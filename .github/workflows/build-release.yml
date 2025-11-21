@@ -40,16 +40,6 @@ on:
         required: false
         default: 'hatlabs/apt.hatlabs.fi'
         type: string
-      test-action:
-        description: 'Path to the test action'
-        required: false
-        default: './.github/actions/run-tests'
-        type: string
-      build-action:
-        description: 'Path to the build action'
-        required: false
-        default: './.github/actions/build-deb'
-        type: string
       version-file:
         description: 'Path to VERSION file'
         required: false
@@ -92,7 +82,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run tests
-        uses: ${{ inputs.test-action }}
+        uses: ./.github/actions/run-tests
 
   build-and-release:
     needs: [test]
@@ -225,7 +215,7 @@ jobs:
 
       - name: Build .deb package
         if: steps.check.outputs.action == 'create'
-        uses: ${{ inputs.build-action }}
+        uses: ./.github/actions/build-deb
 
       - name: Rename package with distro+component suffix
         if: steps.check.outputs.action == 'create'

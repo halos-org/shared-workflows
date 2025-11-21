@@ -2,18 +2,16 @@
 # Called by: repo/.github/workflows/pr.yml
 #
 # This workflow runs tests on pull requests using the caller repo's
-# local test action.
+# local test action at .github/actions/run-tests.
+#
+# Requirements:
+# - Caller repo must have .github/actions/run-tests/action.yml
 
 name: PR Checks
 
 on:
   workflow_call:
     inputs:
-      test-action:
-        description: 'Path to the test action (relative to repo root)'
-        required: false
-        default: './.github/actions/run-tests'
-        type: string
       runs-on:
         description: 'Runner to use'
         required: false
@@ -31,4 +29,4 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run tests
-        uses: ${{ inputs.test-action }}
+        uses: ./.github/actions/run-tests

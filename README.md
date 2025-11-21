@@ -32,8 +32,9 @@ jobs:
 **Inputs:**
 | Input | Default | Description |
 |-------|---------|-------------|
-| `test-action` | `./.github/actions/run-tests` | Path to test action |
 | `runs-on` | `ubuntu-latest` | Runner to use |
+
+**Required local action**: `.github/actions/run-tests/action.yml`
 
 ### build-release.yml
 
@@ -65,12 +66,14 @@ jobs:
 | `apt-distro` | `trixie` | APT distribution |
 | `apt-component` | `main` | APT component |
 | `apt-repository` | `hatlabs/apt.hatlabs.fi` | APT repo to dispatch to |
-| `test-action` | `./.github/actions/run-tests` | Path to test action |
-| `build-action` | `./.github/actions/build-deb` | Path to build action |
 | `version-file` | `VERSION` | Path to version file |
 | `maintainer-name` | `Hat Labs` | Changelog maintainer |
 | `maintainer-email` | `info@hatlabs.fi` | Changelog email |
 | `skip-tests` | `false` | Skip test job |
+
+**Required local actions** (hardcoded paths):
+- `.github/actions/run-tests/action.yml` - Test action
+- `.github/actions/build-deb/action.yml` - Build action
 
 **Secrets:**
 | Secret | Description |
