@@ -75,6 +75,14 @@ jobs:
 - `.github/actions/run-tests/action.yml` - Test action
 - `.github/actions/build-deb/action.yml` - Build action
 
+**Optional local script overrides** (for multi-package or custom repos):
+- `.github/scripts/generate-changelog.sh` - Custom changelog generation
+- `.github/scripts/rename-packages.sh` - Custom package renaming
+- `.github/scripts/generate-release-notes.sh` - Custom release notes
+
+If these scripts exist, they will be called instead of the default inlined logic.
+See [Local Script Overrides](#local-script-overrides) for details.
+
 **Secrets:**
 | Secret | Description |
 |--------|-------------|
@@ -193,12 +201,52 @@ To migrate an existing repository:
 
 3. **Copy caller templates** from `examples/` and customize.
 
-4. **Remove old scripts** (now inlined in shared workflows):
-   - `.github/scripts/calculate-revision.sh`
-   - `.github/scripts/generate-changelog.sh`
-   - `.github/scripts/generate-release-notes.sh`
+4. **Scripts**: For simple single-package repos, you can remove old scripts (now inlined).
+   For multi-package repos, keep the scripts - they'll be used as overrides.
 
 5. **Test** with a PR before merging.
+
+## Local Script Overrides
+
+For repos with non-standard structures (e.g., multiple packages, subdirectories), provide local scripts that the shared workflow will call instead of the default inlined logic.
+
+### generate-changelog.sh
+
+Called with: `--upstream <version> --revision <N>`
+
+Example for multi-package repo:
+```bash
+#!/bin/bash
+# Generate changelogs for multiple packages
+for pkg in halos halos-marine; do
+  cat > ${pkg}/debian/changelog <<EOF
+${pkg} (${UPSTREAM}-${REVISION}) unstable; urgency=medium
+  * Build ${REVISION}
+ -- Maintainer <email>  $(date -R)
+EOF
+done
+```
+
+### rename-packages.sh
+
+Called with: `--version <debian-version> --distro <distro> --component <component>`
+
+Example:
+```bash
+#!/bin/bash
+# Rename multiple packages
+for pkg in halos halos-marine; do
+  OLD="${pkg}_${VERSION}_all.deb"
+  NEW="${pkg}_${VERSION}_all+${DISTRO}+${COMPONENT}.deb"
+  [ -f "$OLD" ] && mv "$OLD" "$NEW"
+done
+```
+
+### generate-release-notes.sh
+
+Called with: `<debian-version> <tag-version> <release-type>`
+
+Where `release-type` is `prerelease` or `draft`. Must write to `release_notes.md`.
 
 ## Examples
 
