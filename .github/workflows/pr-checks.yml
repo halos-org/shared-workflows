@@ -1,0 +1,34 @@
+# Reusable workflow for PR checks
+# Called by: repo/.github/workflows/pr.yml
+#
+# This workflow runs tests on pull requests using the caller repo's
+# local test action.
+
+name: PR Checks
+
+on:
+  workflow_call:
+    inputs:
+      test-action:
+        description: 'Path to the test action (relative to repo root)'
+        required: false
+        default: './.github/actions/run-tests'
+        type: string
+      runs-on:
+        description: 'Runner to use'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        uses: ${{ inputs.test-action }}

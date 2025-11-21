@@ -1,0 +1,15 @@
+name: Release Published
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    uses: hatlabs/shared-workflows/.github/workflows/publish-stable.yml@main
+    # Optional: override defaults
+    # with:
+    #   apt-distro: 'trixie'
+    #   apt-component: 'main'
+    secrets:
+      APT_REPO_PAT: ${{ secrets.APT_REPO_PAT }}

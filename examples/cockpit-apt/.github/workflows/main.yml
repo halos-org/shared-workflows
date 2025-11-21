@@ -1,0 +1,19 @@
+name: Main Branch CI/CD
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-release:
+    uses: hatlabs/shared-workflows/.github/workflows/build-release.yml@main
+    with:
+      package-name: cockpit-apt
+      package-description: 'Modern Cockpit interface for APT package management on Debian'
+      # These use defaults, but shown for clarity:
+      # apt-distro: 'trixie'
+      # apt-component: 'main'
+      # test-action: './.github/actions/run-tests'
+      # build-action: './.github/actions/build-deb'
+    secrets:
+      APT_REPO_PAT: ${{ secrets.APT_REPO_PAT }}
