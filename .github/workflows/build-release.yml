@@ -149,38 +149,49 @@ jobs:
         run: |
           UPSTREAM="${{ steps.version.outputs.upstream }}"
           REVISION="${{ steps.revision.outputs.revision }}"
-          DEBIAN_VERSION="${UPSTREAM}-${REVISION}"
-          DISTRIBUTION="unstable"
-          URGENCY="medium"
-          DATE=$(date -R)
 
-          # Get recent changes from git log
-          LAST_TAG=$(git tag -l "v*" --sort=-version:refname | grep -v "_pre" | head -n1 || echo "")
-
-          if [ -n "$LAST_TAG" ]; then
-            CHANGES=$(git log "${LAST_TAG}"..HEAD --pretty=format:"  * %s" --no-merges -- || echo "  * Build ${REVISION}")
+          # Check for local script override
+          if [ -f ".github/scripts/generate-changelog.sh" ]; then
+            echo "Using local generate-changelog.sh script"
+            .github/scripts/generate-changelog.sh \
+              --upstream "$UPSTREAM" \
+              --revision "$REVISION"
           else
-            CHANGES=$(git log -10 --pretty=format:"  * %s" --no-merges || echo "  * Build ${REVISION}")
-          fi
+            # Default: single package with debian/ at root
+            echo "Using default changelog generation"
+            DEBIAN_VERSION="${UPSTREAM}-${REVISION}"
+            DISTRIBUTION="unstable"
+            URGENCY="medium"
+            DATE=$(date -R)
 
-          if [ -z "$CHANGES" ]; then
-            CHANGES="  * Build ${REVISION}"
-          fi
+            # Get recent changes from git log
+            LAST_TAG=$(git tag -l "v*" --sort=-version:refname | grep -v "_pre" | head -n1 || echo "")
 
-          # Generate debian/changelog entry
-          cat > debian/changelog <<EOF
+            if [ -n "$LAST_TAG" ]; then
+              CHANGES=$(git log "${LAST_TAG}"..HEAD --pretty=format:"  * %s" --no-merges -- || echo "  * Build ${REVISION}")
+            else
+              CHANGES=$(git log -10 --pretty=format:"  * %s" --no-merges || echo "  * Build ${REVISION}")
+            fi
+
+            if [ -z "$CHANGES" ]; then
+              CHANGES="  * Build ${REVISION}"
+            fi
+
+            # Generate debian/changelog entry
+            cat > debian/changelog <<CHANGELOG_EOF
           ${{ inputs.package-name }} (${DEBIAN_VERSION}) ${DISTRIBUTION}; urgency=${URGENCY}
 
           ${CHANGES}
 
            -- ${{ inputs.maintainer-name }} <${{ inputs.maintainer-email }}>  ${DATE}
-          EOF
+          CHANGELOG_EOF
 
-          # Remove leading whitespace from heredoc
-          sed -i 's/^          //' debian/changelog
+            # Remove leading whitespace from heredoc
+            sed -i 's/^          //' debian/changelog
 
-          echo "Generated debian/changelog:"
-          cat debian/changelog
+            echo "Generated debian/changelog:"
+            cat debian/changelog
+          fi
 
       - name: Set version variables
         id: versions
@@ -217,22 +228,33 @@ jobs:
         if: steps.check.outputs.action == 'create'
         uses: ./.github/actions/build-deb
 
-      - name: Rename package with distro+component suffix
+      - name: Rename packages with distro+component suffix
         if: steps.check.outputs.action == 'create'
         run: |
           DEBIAN_VERSION="${{ steps.versions.outputs.debian_version }}"
-          OLD_NAME="${PACKAGE_NAME}_${DEBIAN_VERSION}_all.deb"
-          NEW_NAME="${PACKAGE_NAME}_${DEBIAN_VERSION}_all+${APT_DISTRO}+${APT_COMPONENT}.deb"
 
-          if [ -f "$OLD_NAME" ]; then
-            echo "Renaming package: $(basename $OLD_NAME) -> $(basename $NEW_NAME)"
-            mv "$OLD_NAME" "$NEW_NAME"
-            echo "Package renamed successfully"
+          # Check for local script override
+          if [ -f ".github/scripts/rename-packages.sh" ]; then
+            echo "Using local rename-packages.sh script"
+            .github/scripts/rename-packages.sh \
+              --version "$DEBIAN_VERSION" \
+              --distro "$APT_DISTRO" \
+              --component "$APT_COMPONENT"
           else
-            echo "Error: Expected package not found: $OLD_NAME"
-            echo "Available .deb files:"
-            ls -la *.deb 2>/dev/null || echo "None found"
-            exit 1
+            # Default: single package
+            OLD_NAME="${PACKAGE_NAME}_${DEBIAN_VERSION}_all.deb"
+            NEW_NAME="${PACKAGE_NAME}_${DEBIAN_VERSION}_all+${APT_DISTRO}+${APT_COMPONENT}.deb"
+
+            if [ -f "$OLD_NAME" ]; then
+              echo "Renaming package: $(basename $OLD_NAME) -> $(basename $NEW_NAME)"
+              mv "$OLD_NAME" "$NEW_NAME"
+              echo "Package renamed successfully"
+            else
+              echo "Error: Expected package not found: $OLD_NAME"
+              echo "Available .deb files:"
+              ls -la *.deb 2>/dev/null || echo "None found"
+              exit 1
+            fi
           fi
 
       - name: Generate pre-release notes
@@ -240,19 +262,29 @@ jobs:
         run: |
           DEBIAN_VERSION="${{ steps.versions.outputs.debian_version }}"
           TAG_VERSION="${{ steps.versions.outputs.prerelease_tag }}"
-          SHORT_SHA="${GITHUB_SHA:0:7}"
 
-          # Get changelog since last published release
-          LAST_TAG=$(gh release list --limit 100 --json tagName,isPrerelease,isDraft \
-            --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' | head -n1 || true)
-
-          if [ -n "$LAST_TAG" ]; then
-            CHANGELOG=$(git log "${LAST_TAG}"..HEAD --pretty=format:"- %s (%h)" --no-merges -- || echo "- Build ${DEBIAN_VERSION}")
+          # Check for local script override
+          if [ -f ".github/scripts/generate-release-notes.sh" ]; then
+            echo "Using local generate-release-notes.sh script"
+            .github/scripts/generate-release-notes.sh \
+              "$DEBIAN_VERSION" \
+              "$TAG_VERSION" \
+              prerelease
           else
-            CHANGELOG=$(git log -10 --pretty=format:"- %s (%h)" --no-merges)
-          fi
+            # Default release notes
+            SHORT_SHA="${GITHUB_SHA:0:7}"
 
-          cat > release_notes.md <<EOF
+            # Get changelog since last published release
+            LAST_TAG=$(gh release list --limit 100 --json tagName,isPrerelease,isDraft \
+              --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' | head -n1 || true)
+
+            if [ -n "$LAST_TAG" ]; then
+              CHANGELOG=$(git log "${LAST_TAG}"..HEAD --pretty=format:"- %s (%h)" --no-merges -- || echo "- Build ${DEBIAN_VERSION}")
+            else
+              CHANGELOG=$(git log -10 --pretty=format:"- %s (%h)" --no-merges)
+            fi
+
+            cat > release_notes.md <<NOTES_EOF
           ## ${{ inputs.package-name }} ${TAG_VERSION} (Pre-release)
 
           > **This is a pre-release build from the main branch. Use for testing only.**
@@ -280,10 +312,11 @@ jobs:
           sudo apt update
           sudo apt install ${{ inputs.package-name }}
           \`\`\`
-          EOF
+          NOTES_EOF
 
-          # Remove leading whitespace from heredoc
-          sed -i 's/^          //' release_notes.md
+            # Remove leading whitespace from heredoc
+            sed -i 's/^          //' release_notes.md
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -309,18 +342,28 @@ jobs:
         if: steps.check.outputs.action == 'create'
         run: |
           DEBIAN_VERSION="${{ steps.versions.outputs.debian_version }}"
+          STABLE_TAG="${{ steps.versions.outputs.stable_tag }}"
 
-          # Get changelog since last published release
-          LAST_TAG=$(gh release list --limit 100 --json tagName,isPrerelease,isDraft \
-            --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' | head -n1 || true)
-
-          if [ -n "$LAST_TAG" ]; then
-            CHANGELOG=$(git log "${LAST_TAG}"..HEAD --pretty=format:"- %s (%h)" --no-merges -- || echo "- Release ${DEBIAN_VERSION}")
+          # Check for local script override
+          if [ -f ".github/scripts/generate-release-notes.sh" ]; then
+            echo "Using local generate-release-notes.sh script"
+            .github/scripts/generate-release-notes.sh \
+              "$DEBIAN_VERSION" \
+              "$STABLE_TAG" \
+              draft
           else
-            CHANGELOG=$(git log -10 --pretty=format:"- %s (%h)" --no-merges)
-          fi
+            # Default release notes
+            # Get changelog since last published release
+            LAST_TAG=$(gh release list --limit 100 --json tagName,isPrerelease,isDraft \
+              --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' | head -n1 || true)
 
-          cat > release_notes.md <<EOF
+            if [ -n "$LAST_TAG" ]; then
+              CHANGELOG=$(git log "${LAST_TAG}"..HEAD --pretty=format:"- %s (%h)" --no-merges -- || echo "- Release ${DEBIAN_VERSION}")
+            else
+              CHANGELOG=$(git log -10 --pretty=format:"- %s (%h)" --no-merges)
+            fi
+
+            cat > release_notes.md <<NOTES_EOF
           ## ${{ inputs.package-name }} v${DEBIAN_VERSION}
 
           ${{ inputs.package-description }}
@@ -337,10 +380,11 @@ jobs:
           sudo apt update
           sudo apt install ${{ inputs.package-name }}
           \`\`\`
-          EOF
+          NOTES_EOF
 
-          # Remove leading whitespace from heredoc
-          sed -i 's/^          //' release_notes.md
+            # Remove leading whitespace from heredoc
+            sed -i 's/^          //' release_notes.md
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
 
