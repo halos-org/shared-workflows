@@ -10,14 +10,12 @@ on:
   workflow_call:
     inputs:
       apt-distro:
-        description: 'APT distribution (e.g., trixie, bookworm)'
-        required: false
-        default: 'trixie'
+        description: 'APT distribution (e.g., trixie, bookworm, any)'
+        required: true
         type: string
       apt-component:
-        description: 'APT component (e.g., main)'
-        required: false
-        default: 'main'
+        description: 'APT component (e.g., main, hatlabs)'
+        required: true
         type: string
       apt-repository:
         description: 'APT repository to dispatch to'
