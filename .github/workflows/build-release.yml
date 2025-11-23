@@ -63,6 +63,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip-if-version-released:
+        description: 'Skip build if any release already exists for current VERSION (no auto-increment)'
+        required: false
+        default: false
+        type: boolean
     secrets:
       APT_REPO_PAT:
         description: 'PAT for dispatching to APT repository'
@@ -103,7 +108,28 @@ jobs:
           echo "upstream=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
           echo "Upstream version: $UPSTREAM_VERSION"
 
+      - name: Check if version already released
+        if: ${{ inputs.skip-if-version-released }}
+        id: version-check
+        run: |
+          UPSTREAM_VERSION="${{ steps.version.outputs.upstream }}"
+          UPSTREAM_VERSION="${UPSTREAM_VERSION#v}"  # Remove 'v' prefix if present
+
+          # Check if any release exists for this version
+          PATTERN="v${UPSTREAM_VERSION}+*"
+          EXISTING_TAGS=$(git tag -l "$PATTERN" 2>/dev/null || true)
+
+          if [ -n "$EXISTING_TAGS" ]; then
+            echo "version_released=true" >> $GITHUB_OUTPUT
+            echo "Release already exists for version $UPSTREAM_VERSION, skipping build"
+            echo "Existing tags: $EXISTING_TAGS"
+          else
+            echo "version_released=false" >> $GITHUB_OUTPUT
+            echo "No release exists for version $UPSTREAM_VERSION, will create"
+          fi
+
       - name: Calculate revision number
+        if: ${{ !inputs.skip-if-version-released || steps.version-check.outputs.version_released != 'true' }}
         id: revision
         run: |
           # Calculate the next revision number for a given upstream version
@@ -144,6 +170,7 @@ jobs:
           echo "Revision number: $NEXT_REVISION"
 
       - name: Generate debian/changelog
+        if: ${{ !inputs.skip-if-version-released || steps.version-check.outputs.version_released != 'true' }}
         run: |
           UPSTREAM="${{ steps.version.outputs.upstream }}"
           REVISION="${{ steps.revision.outputs.revision }}"
@@ -192,6 +219,7 @@ jobs:
           fi
 
       - name: Set version variables
+        if: ${{ !inputs.skip-if-version-released || steps.version-check.outputs.version_released != 'true' }}
         id: versions
         run: |
           UPSTREAM="${{ steps.version.outputs.upstream }}"
@@ -209,6 +237,7 @@ jobs:
           echo "Stable tag: $STABLE_TAG"
 
       - name: Check if pre-release exists
+        if: ${{ !inputs.skip-if-version-released || steps.version-check.outputs.version_released != 'true' }}
         id: check
         run: |
           TAG="${{ steps.versions.outputs.prerelease_tag }}"
@@ -443,3 +472,14 @@ jobs:
           echo "  1. Test the unstable package"
           echo "  2. Publish the draft release in GitHub UI"
           echo "  3. release.yml will dispatch to stable channel"
+
+      - name: Report skipped (version already released)
+        if: ${{ inputs.skip-if-version-released && steps.version-check.outputs.version_released == 'true' }}
+        run: |
+          UPSTREAM="${{ steps.version.outputs.upstream }}"
+          echo "=== Build Skipped ==="
+          echo "Package: ${{ inputs.package-name }}"
+          echo "Version: ${UPSTREAM}"
+          echo ""
+          echo "A release already exists for this version."
+          echo "To create a new release, bump the VERSION file."
