@@ -386,6 +386,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      - name: Delete previous draft releases
+        if: steps.check.outputs.action == 'create'
+        run: |
+          echo "Cleaning up previous draft releases..."
+          # List all draft releases and delete them
+          DRAFT_RELEASES=$(gh release list --json tagName,isDraft --jq '.[] | select(.isDraft == true) | .tagName')
+
+          if [ -z "$DRAFT_RELEASES" ]; then
+            echo "No draft releases to clean up"
+          else
+            while IFS= read -r tag; do
+              echo "Deleting draft release: $tag"
+              gh release delete "$tag" --yes
+            done <<< "$DRAFT_RELEASES"
+            echo "Draft releases cleaned up"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Create draft stable release
         if: steps.check.outputs.action == 'create'
         run: |
