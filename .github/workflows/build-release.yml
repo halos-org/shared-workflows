@@ -391,7 +391,7 @@ jobs:
         run: |
           echo "Cleaning up previous draft releases..."
           # List all draft releases and delete them
-          DRAFT_RELEASES=$(gh release list --json tagName,isDraft --jq '.[] | select(.isDraft == true) | .tagName')
+          DRAFT_RELEASES=$(gh release list --limit 100 --json tagName,isDraft --jq '.[] | select(.isDraft == true) | .tagName')
 
           if [ -z "$DRAFT_RELEASES" ]; then
             echo "No draft releases to clean up"
