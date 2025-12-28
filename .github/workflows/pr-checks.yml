@@ -6,6 +6,7 @@
 #
 # Requirements:
 # - Caller repo must have .github/actions/run-tests/action.yml
+# - For lintian checks: .github/actions/build-deb/action.yml (optional)
 
 name: PR Checks
 
@@ -17,6 +18,11 @@ on:
         required: false
         default: 'ubuntu-latest'
         type: string
+      skip-lintian:
+        description: 'Skip lintian checks (for repos without Debian packages)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -30,3 +36,51 @@ jobs:
 
       - name: Run tests
         uses: ./.github/actions/run-tests
+
+  lintian:
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip-lintian }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if build-deb action exists
+        id: check-build-deb
+        run: |
+          if [ -f ".github/actions/build-deb/action.yml" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Debian package
+        if: steps.check-build-deb.outputs.exists == 'true'
+        uses: ./.github/actions/build-deb
+
+      - name: Install lintian
+        if: steps.check-build-deb.outputs.exists == 'true'
+        run: sudo apt-get update && sudo apt-get install -y lintian
+
+      - name: Run lintian
+        if: steps.check-build-deb.outputs.exists == 'true'
+        run: |
+          echo "Running lintian on built packages..."
+          failed=0
+          for deb in *.deb; do
+            if [ -f "$deb" ]; then
+              echo ""
+              echo "=== Checking: $deb ==="
+              # Run lintian with informational output, fail on errors and warnings
+              if ! lintian --info --display-info --fail-on error,warning "$deb"; then
+                failed=1
+              fi
+            fi
+          done
+          if [ $failed -eq 1 ]; then
+            echo ""
+            echo "❌ Lintian found issues. See above for details."
+            echo "To suppress specific tags, create debian/<package>.lintian-overrides"
+            exit 1
+          fi
+          echo ""
+          echo "✅ Lintian checks passed"

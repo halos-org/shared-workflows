@@ -14,7 +14,7 @@ These workflows implement a standardized release process:
 
 ### pr-checks.yml
 
-Runs tests on pull requests.
+Runs tests and lintian checks on pull requests.
 
 ```yaml
 # .github/workflows/pr.yml
@@ -32,9 +32,22 @@ jobs:
 **Inputs:**
 | Input | Default | Description |
 |-------|---------|-------------|
-| `runs-on` | `ubuntu-latest` | Runner to use |
+| `runs-on` | `ubuntu-latest` | Runner to use for tests |
+| `skip-lintian` | `false` | Skip lintian checks |
+
+**Jobs:**
+1. **tests**: Runs `.github/actions/run-tests/action.yml`
+2. **lintian**: Builds package and runs lintian (if `.github/actions/build-deb/action.yml` exists)
+
+**Lintian Checks:**
+- Automatically runs if `.github/actions/build-deb/action.yml` exists
+- Fails on errors and warnings
+- To suppress specific tags, create `debian/<package>.lintian-overrides`
+- Set `skip-lintian: true` to disable
 
 **Required local action**: `.github/actions/run-tests/action.yml`
+
+**Optional local action**: `.github/actions/build-deb/action.yml` (enables lintian checks)
 
 ### build-release.yml
 
