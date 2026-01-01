@@ -37,7 +37,13 @@ jobs:
 
 **Jobs:**
 1. **tests**: Runs `.github/actions/run-tests/action.yml`
-2. **lintian**: Builds package and runs lintian (if `.github/actions/build-deb/action.yml` exists)
+2. **version-check**: Runs `.github/actions/check-versions/action.yml` (if exists)
+3. **lintian**: Builds package and runs lintian (if `.github/actions/build-deb/action.yml` exists)
+
+**Version Checks:**
+- Automatically runs if `.github/actions/check-versions/action.yml` exists
+- Use to verify VERSION file stays in sync with language-specific version files
+- Each repo implements its own version checking logic
 
 **Lintian Checks:**
 - Automatically runs if `.github/actions/build-deb/action.yml` exists
@@ -47,7 +53,9 @@ jobs:
 
 **Required local action**: `.github/actions/run-tests/action.yml`
 
-**Optional local action**: `.github/actions/build-deb/action.yml` (enables lintian checks)
+**Optional local actions**:
+- `.github/actions/build-deb/action.yml` (enables lintian checks)
+- `.github/actions/check-versions/action.yml` (enables version consistency checks)
 
 ### build-release.yml
 
