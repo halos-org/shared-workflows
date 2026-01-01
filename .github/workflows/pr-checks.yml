@@ -6,6 +6,7 @@
 #
 # Requirements:
 # - Caller repo must have .github/actions/run-tests/action.yml
+# - For version checks: .github/actions/check-versions/action.yml (optional)
 # - For lintian checks: .github/actions/build-deb/action.yml (optional)
 
 name: PR Checks
@@ -38,7 +39,7 @@ jobs:
         uses: ./.github/actions/run-tests
 
   version-check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -46,7 +47,7 @@ jobs:
       - name: Check if check-versions action exists
         id: check-action
         run: |
-          if [ -f ".github/actions/check-versions/action.yml" ]; then
+          if [ -f ".github/actions/check-versions/action.yml" ] || [ -f ".github/actions/check-versions/action.yaml" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
