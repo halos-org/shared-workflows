@@ -37,6 +37,25 @@ jobs:
       - name: Run tests
         uses: ./.github/actions/run-tests
 
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if check-versions action exists
+        id: check-action
+        run: |
+          if [ -f ".github/actions/check-versions/action.yml" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check version consistency
+        if: steps.check-action.outputs.exists == 'true'
+        uses: ./.github/actions/check-versions
+
   lintian:
     runs-on: ubuntu-latest
     if: ${{ !inputs.skip-lintian }}
