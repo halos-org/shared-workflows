@@ -63,6 +63,11 @@ on:
         required: false
         default: false
         type: boolean
+      run-lintian:
+        description: 'Run lintian checks on built packages (backstop for container-packaging-tools repos)'
+        required: false
+        default: true
+        type: boolean
     secrets:
       APT_REPO_PAT:
         description: 'PAT for dispatching to APT repository'
@@ -225,6 +230,33 @@ jobs:
       - name: Build .deb package
         if: steps.check.outputs.action == 'create'
         uses: ./.github/actions/build-deb
+
+      - name: Run lintian checks
+        if: steps.check.outputs.action == 'create' && inputs.run-lintian
+        run: |
+          echo "Installing lintian..."
+          sudo apt-get update && sudo apt-get install -y lintian
+
+          echo "Running lintian on built packages..."
+          failed=0
+          for deb in *.deb; do
+            if [ -f "$deb" ]; then
+              echo ""
+              echo "=== Checking: $deb ==="
+              # Run lintian with informational output, fail on errors and warnings
+              if ! lintian --info --display-info --fail-on error,warning "$deb"; then
+                failed=1
+              fi
+            fi
+          done
+          if [ $failed -eq 1 ]; then
+            echo ""
+            echo "❌ Lintian found issues. See above for details."
+            echo "To suppress specific tags, create debian/<package>.lintian-overrides"
+            exit 1
+          fi
+          echo ""
+          echo "✅ Lintian checks passed"
 
       - name: Rename packages with distro+component suffix
         if: steps.check.outputs.action == 'create'
