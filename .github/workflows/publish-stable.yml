@@ -22,11 +22,12 @@ on:
         required: false
         default: 'hatlabs/apt.hatlabs.fi'
         type: string
-      # Version tag format: v{upstream}+{revision} (e.g., v0.2.0+1)
+      # Version tag format: v{upstream}+{revision} (e.g., v0.2.0+1 or v1.0.7.2+1)
       version-pattern:
-        description: 'Regex pattern to validate version tags'
+        description: 'Regex pattern to validate version tags (must capture upstream and revision)'
         required: false
-        default: '^v([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$'
+        # Matches both 3-part (1.0.7) and 4-part (1.0.7.2) versions
+        default: '^v([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)\+([0-9]+)$'
         type: string
     secrets:
       APT_REPO_PAT:
