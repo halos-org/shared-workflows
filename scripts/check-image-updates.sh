@@ -10,7 +10,8 @@
 #
 # Side effects:
 #   - Updates compose files in-place with newer image tags
-#   - Bumps VERSION and .bumpversion.cfg if present
+#   - Bumps per-app metadata.yaml if present alongside compose file
+#   - Bumps VERSION and .bumpversion.cfg if no per-app metadata was bumped
 #   - Writes /tmp/pr_body.md with the PR description
 
 set -euo pipefail
@@ -90,7 +91,11 @@ fetch_tags() {
 # ---------------------------------------------------------------------------
 
 UPDATES_FILE=$(mktemp)
+METADATA_BUMPS_FILE=$(mktemp)
+BUMPED_METADATA=""  # track already-bumped metadata files
 HAS_UPDATES=false
+DID_METADATA_BUMP=false
+trap 'rm -f "$UPDATES_FILE" "$METADATA_BUMPS_FILE"' EXIT
 
 while IFS='|' read -r file service image current_tag; do
   echo "--- $service ($image:$current_tag) ---"
@@ -117,6 +122,44 @@ while IFS='|' read -r file service image current_tag; do
     HAS_UPDATES=true
     sed -i "s|${image}:${current_tag}|${image}:${latest}|g" "$file"
     echo "| $service | $image | \`$current_tag\` | \`$latest\` |" >> "$UPDATES_FILE"
+
+    # Bump per-app metadata.yaml if present alongside the compose file
+    app_dir=$(dirname "$file")
+    metadata="$app_dir/metadata.yaml"
+    if [ -f "$metadata" ] && [[ "$BUMPED_METADATA" != *"|$metadata|"* ]]; then
+      stripped_tag="${latest#v}"
+      new_meta_ver="${stripped_tag}-1"
+      old_meta_ver=$(python3 -c "
+import yaml, sys
+d = yaml.safe_load(open(sys.argv[1]))
+v = d.get('version')
+if v is None: sys.exit(1)
+print(v)
+" "$metadata") || { echo "  metadata.yaml: no version field, skipping"; continue; }
+      # Update version and upstream_version, preserving any YAML quoting style
+      python3 - "$metadata" "$new_meta_ver" "$stripped_tag" << 'PYEOF'
+import sys
+path, new_ver, new_upstream = sys.argv[1:]
+lines = []
+for line in open(path):
+    for key, val in [('version:', new_ver), ('upstream_version:', new_upstream)]:
+        if line.startswith(key):
+            rest = line[len(key):].strip()
+            if rest.startswith('"') or rest.startswith("'"):
+                q = rest[0]
+                line = f'{key} {q}{val}{q}\n'
+            else:
+                line = f'{key} {val}\n'
+            break
+    lines.append(line)
+with open(path, 'w') as f:
+    f.writelines(lines)
+PYEOF
+      BUMPED_METADATA="${BUMPED_METADATA}|$metadata|"
+      echo "| $service | \`$old_meta_ver\` | \`$new_meta_ver\` |" >> "$METADATA_BUMPS_FILE"
+      DID_METADATA_BUMP=true
+      echo "  metadata.yaml: $old_meta_ver -> $new_meta_ver"
+    fi
   else
     echo "  Up to date"
   fi
@@ -126,7 +169,7 @@ if [ "$HAS_UPDATES" = false ]; then
   echo ""
   echo "All images are up to date."
   echo "has_updates=false" >> "$GITHUB_OUTPUT"
-  rm -f "$UPDATES_FILE"
+  rm -f "$UPDATES_FILE" "$METADATA_BUMPS_FILE"
   exit 0
 fi
 
@@ -136,7 +179,7 @@ fi
 
 OLD_VER=""
 NEW_VER=""
-if [ -f VERSION ]; then
+if [ "$DID_METADATA_BUMP" = false ] && [ -f VERSION ]; then
   OLD_VER=$(tr -d '[:space:]' < VERSION)
   NEW_VER=$(echo "$OLD_VER" | awk -F. '{ $NF = $NF + 1; print }' OFS='.')
   echo "$NEW_VER" > VERSION
@@ -155,6 +198,14 @@ fi
   echo "| Service | Image | Current | Latest |"
   echo "|---------|-------|---------|--------|"
   cat "$UPDATES_FILE"
+  if [ -s "$METADATA_BUMPS_FILE" ]; then
+    echo ""
+    echo "### App version bumps"
+    echo ""
+    echo "| App | Old | New |"
+    echo "|-----|-----|-----|"
+    cat "$METADATA_BUMPS_FILE"
+  fi
   if [ -n "$OLD_VER" ]; then
     echo ""
     echo "### VERSION bump"
@@ -170,4 +221,4 @@ echo ""
 echo "=== PR body ==="
 cat /tmp/pr_body.md
 
-rm -f "$UPDATES_FILE"
+rm -f "$UPDATES_FILE" "$METADATA_BUMPS_FILE"
