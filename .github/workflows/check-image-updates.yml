@@ -39,11 +39,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # github.workflow_ref = "owner/repo/path@refs/heads/branch" — extract the ref
+      # after @ so the scripts checkout matches whichever version the caller pinned.
+      - name: Resolve shared workflow ref
+        id: wf-ref
+        run: echo "ref=${WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+
       - name: Checkout shared scripts
         uses: actions/checkout@v4
         with:
           repository: hatlabs/shared-workflows
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ steps.wf-ref.outputs.ref }}
           path: .shared-workflows
           sparse-checkout: scripts
 
