@@ -50,7 +50,7 @@ jobs:
       - name: Checkout shared scripts
         uses: actions/checkout@v4
         with:
-          repository: hatlabs/shared-workflows
+          repository: halos-org/shared-workflows
           ref: ${{ steps.wf-ref.outputs.ref }}
           path: .shared-workflows
           sparse-checkout: scripts
