@@ -20,7 +20,7 @@ on:
       apt-repository:
         description: 'APT repository to dispatch to'
         required: false
-        default: 'hatlabs/apt.hatlabs.fi'
+        default: 'halos-org/apt.halos.fi'
         type: string
       # Version tag format: v{upstream}+{revision} (e.g., v0.2.0+1 or v1.0.7.2+1)
       version-pattern:

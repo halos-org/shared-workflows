@@ -6,7 +6,7 @@ on:
 
 jobs:
   publish:
-    uses: hatlabs/shared-workflows/.github/workflows/publish-stable.yml@main
+    uses: halos-org/shared-workflows/.github/workflows/publish-stable.yml@main
     # Optional: override defaults
     # with:
     #   apt-distro: 'trixie'

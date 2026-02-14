@@ -6,7 +6,7 @@ on:
 
 jobs:
   checks:
-    uses: hatlabs/shared-workflows/.github/workflows/pr-checks.yml@main
+    uses: halos-org/shared-workflows/.github/workflows/pr-checks.yml@main
     # Optional: override defaults
     # with:
     #   test-action: './.github/actions/run-tests'

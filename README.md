@@ -26,7 +26,7 @@ on:
 
 jobs:
   checks:
-    uses: hatlabs/shared-workflows/.github/workflows/pr-checks.yml@main
+    uses: halos-org/shared-workflows/.github/workflows/pr-checks.yml@main
 ```
 
 **Inputs:**
@@ -71,7 +71,7 @@ on:
 
 jobs:
   build-release:
-    uses: hatlabs/shared-workflows/.github/workflows/build-release.yml@main
+    uses: halos-org/shared-workflows/.github/workflows/build-release.yml@main
     with:
       package-name: my-package
       package-description: 'Description for release notes'
@@ -123,7 +123,7 @@ on:
 
 jobs:
   publish:
-    uses: hatlabs/shared-workflows/.github/workflows/publish-stable.yml@main
+    uses: halos-org/shared-workflows/.github/workflows/publish-stable.yml@main
     secrets:
       APT_REPO_PAT: ${{ secrets.APT_REPO_PAT }}
 ```
