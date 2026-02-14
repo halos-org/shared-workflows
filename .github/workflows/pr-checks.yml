@@ -165,6 +165,7 @@ jobs:
               | grep -v -E '^(tools/|run$|Makefile$|Taskfile\.yml$)' \
               | grep -v -E '^(store/)' \
               | grep -v -E '\.(lock)$' \
+              | grep -v -E '\.lintian-overrides$' \
               || true)
 
             if [ -n "$PACKAGE_FILES" ]; then
