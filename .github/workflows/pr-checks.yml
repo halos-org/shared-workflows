@@ -161,7 +161,7 @@ jobs:
               | grep -v -E '^(VERSION$|.*\.md$|docs/|\.github/|\.devcontainer/|\.vscode/|\.claude/)' \
               | grep -v -E '^(lefthook\.yml$|\.bumpversion\.cfg$|\.gitignore$|\.editorconfig$|LICENSE)' \
               | grep -v -E '^(tests?/|__tests__/|e2e/|.*\.test\.[^/]+$|.*\.spec\.[^/]+$)' \
-              | grep -v -E '^(docker/|Dockerfile|docker-compose)' \
+              | grep -v -E '^(docker/|Dockerfile|docker-compose|config\.)' \
               | grep -v -E '^(tools/|run$|Makefile$|Taskfile\.yml$)' \
               | grep -v -E '^(store/)' \
               | grep -v -E '\.(lock)$' \
