@@ -10,7 +10,8 @@
 # - For lintian checks: .github/actions/build-deb/action.yml (optional)
 #
 # Version bump check:
-# - Requires VERSION file (repo-level) or apps/ directory (app-level)
+# - App-level (apps/*/metadata.yaml): per-PR, requires metadata bump when app files change
+# - Repo-level (VERSION): per-release, requires bump once between stable releases
 # - Automatically skipped for docs, tests, CI, and tooling changes
 
 name: PR Checks
@@ -152,32 +153,50 @@ jobs:
             done
           fi
 
-          # --- Part B: Repo-level VERSION check ---
+          # --- Part B: Repo-level VERSION check (per-release, not per-PR) ---
+          # VERSION must be bumped at least once between stable releases.
+          # Stable tags: v{upstream}+{revision} (no _pre suffix).
           if [ -f "VERSION" ]; then
-            # Filter to non-app, package-affecting files (exclude docs, tests,
-            # CI config, dev tooling, and the VERSION file itself)
-            PACKAGE_FILES=$(echo "$CHANGED_FILES" \
-              | grep -v '^apps/' \
-              | grep -v -E '^(VERSION$|.*\.md$|docs/|\.github/|\.devcontainer/|\.vscode/|\.claude/)' \
-              | grep -v -E '^(lefthook\.yml$|\.bumpversion\.cfg$|\.gitignore$|\.editorconfig$|LICENSE)' \
-              | grep -v -E '^(tests?/|__tests__/|e2e/|.*\.test\.[^/]+$|.*\.spec\.[^/]+$)' \
-              | grep -v -E '^(docker/|Dockerfile|docker-compose|config\.)' \
-              | grep -v -E '^(tools/|run$|Makefile$|Taskfile\.yml$)' \
-              | grep -v -E '^(store/)' \
-              | grep -v -E '\.(lock)$' \
-              | grep -v -E '\.lintian-overrides$' \
-              || true)
+            CURRENT_VERSION=$(cat VERSION | tr -d '[:space:]')
 
-            if [ -n "$PACKAGE_FILES" ]; then
-              if ! echo "$CHANGED_FILES" | grep -q '^VERSION$'; then
-                echo "::error::Package-affecting files changed but VERSION was not bumped."
-                echo ""
-                echo "Changed package files:"
-                echo "$PACKAGE_FILES" | sed 's/^/  /'
-                echo ""
-                echo "Run './run bumpversion patch' (or minor/major) to bump the version."
-                FAILED=1
+            # Find latest stable tag (no _pre suffix)
+            LATEST_STABLE_TAG=$(git tag -l 'v*' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?\+[0-9]+$' \
+              | sort -V | tail -1 || true)
+
+            if [ -n "$LATEST_STABLE_TAG" ]; then
+              # Extract upstream version from tag (e.g., v0.2.0+3 → 0.2.0)
+              TAGGED_VERSION=$(echo "$LATEST_STABLE_TAG" | sed 's/^v\(.*\)+[0-9]*$/\1/')
+
+              if [ "$CURRENT_VERSION" != "$TAGGED_VERSION" ]; then
+                echo "VERSION ($CURRENT_VERSION) differs from latest stable release ($TAGGED_VERSION) — no bump needed"
+              else
+                # VERSION matches latest stable tag — check if package-affecting files changed
+                PACKAGE_FILES=$(echo "$CHANGED_FILES" \
+                  | grep -v '^apps/' \
+                  | grep -v -E '^(VERSION$|.*\.md$|docs/|\.github/|\.devcontainer/|\.vscode/|\.claude/)' \
+                  | grep -v -E '^(lefthook\.yml$|\.bumpversion\.cfg$|\.gitignore$|\.editorconfig$|LICENSE)' \
+                  | grep -v -E '^(tests?/|__tests__/|e2e/|.*\.test\.[^/]+$|.*\.spec\.[^/]+$)' \
+                  | grep -v -E '^(docker/|Dockerfile|docker-compose|config\.)' \
+                  | grep -v -E '^(tools/|run$|Makefile$|Taskfile\.yml$)' \
+                  | grep -v -E '^(store/)' \
+                  | grep -v -E '\.(lock)$' \
+                  | grep -v -E '\.lintian-overrides$' \
+                  || true)
+
+                if [ -n "$PACKAGE_FILES" ]; then
+                  echo "::error::Package-affecting files changed but VERSION ($CURRENT_VERSION) still matches the latest stable release ($LATEST_STABLE_TAG)."
+                  echo ""
+                  echo "Changed package files:"
+                  echo "$PACKAGE_FILES" | sed 's/^/  /'
+                  echo ""
+                  echo "VERSION needs to be bumped before the next release."
+                  echo "Run './run bumpversion patch' (or minor/major) — either in this PR or a separate one."
+                  FAILED=1
+                fi
               fi
+            else
+              echo "No stable release tags found — skipping repo-level version check"
             fi
           fi
 
