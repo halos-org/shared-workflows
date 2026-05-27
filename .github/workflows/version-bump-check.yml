@@ -92,13 +92,18 @@ jobs:
               if [ "$CURRENT_VERSION" != "$TAGGED_VERSION" ]; then
                 echo "::notice::VERSION ($CURRENT_VERSION) is already ahead of the latest stable release ($TAGGED_VERSION) — a prior PR opened the current release cycle, so this PR should NOT bump VERSION. The +N revision auto-increments on each merge."
               else
-                # VERSION matches latest stable tag — check if package-affecting files changed
+                # VERSION matches latest stable tag — check if package-affecting files changed.
+                # Note: root-level docker-compose.yml is NOT excluded — for container-app
+                # repos (halos-core-containers, halos-imported-containers, halos-marine-containers)
+                # the root compose file is the package payload (shipped via debian/rules). Nested
+                # dev/test compose files under docker/ or tests/ are still excluded via those
+                # directory patterns.
                 PACKAGE_FILES=$(echo "$CHANGED_FILES" \
                   | grep -v '^apps/' \
                   | grep -v -E '^(VERSION$|.*\.md$|docs/|\.github/|\.devcontainer/|\.vscode/|\.claude/)' \
                   | grep -v -E '^(lefthook\.yml$|\.bumpversion\.cfg$|\.gitignore$|\.editorconfig$|LICENSE)' \
                   | grep -v -E '^(tests?/|__tests__/|e2e/|.*\.test\.[^/]+$|.*\.spec\.[^/]+$)' \
-                  | grep -v -E '^(docker/|Dockerfile|docker-compose|config\.)' \
+                  | grep -v -E '^(docker/|Dockerfile|config\.)' \
                   | grep -v -E '^(tools/|run$|Makefile$|Taskfile\.yml$)' \
                   | grep -v -E '^(store/)' \
                   | grep -v -E '\.(lock)$' \
