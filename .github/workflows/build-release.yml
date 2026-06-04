@@ -167,13 +167,28 @@ jobs:
             URGENCY="medium"
             DATE=$(date -R)
 
+            # Fold commit subjects into changelog bullets wrapped at 80 columns.
+            # lintian's debian-changelog-line-too-long warning is fatal here
+            # (--fail-on warning), and conventional-commit subjects routinely
+            # exceed the limit once the "  * " prefix is added.
+            wrap_changes() {
+              while IFS= read -r subject; do
+                [ -z "$subject" ] && continue
+                printf '%s\n' "$subject" \
+                  | fold -s -w 76 \
+                  | sed -e 's/[[:space:]]*$//' -e '1s/^/  * /' -e '1!s/^/    /'
+              done
+            }
+
             # Get recent changes from git log
             LAST_TAG=$(git tag -l "v*" --sort=-version:refname | grep -v "_pre" | head -n1 || echo "")
 
+            # tformat (not format) terminates every subject with a newline so
+            # the read loop in wrap_changes does not drop the last commit.
             if [ -n "$LAST_TAG" ]; then
-              CHANGES=$(git log "${LAST_TAG}"..HEAD --pretty=format:"  * %s" --no-merges -- || echo "  * Build ${REVISION}")
+              CHANGES=$(git log "${LAST_TAG}"..HEAD --pretty=tformat:"%s" --no-merges -- | wrap_changes)
             else
-              CHANGES=$(git log -10 --pretty=format:"  * %s" --no-merges || echo "  * Build ${REVISION}")
+              CHANGES=$(git log -10 --pretty=tformat:"%s" --no-merges | wrap_changes)
             fi
 
             if [ -z "$CHANGES" ]; then
