@@ -10,6 +10,13 @@
 # 6. Create pre-release with .deb attached
 # 7. Create draft stable release with .deb attached
 # 8. Dispatch to APT repository unstable channel
+#
+# With build-deb: false the workflow runs in npm-only mode: it still reads
+# VERSION, computes the +N revision, and creates the pre-release + draft
+# stable release (the release-cutting mechanism), but skips the debian
+# changelog, .deb build, lintian, rename, and APT dispatch. Releases are
+# notes-only; a separate release.yml publishes to npm when the draft is
+# published. APT inputs and APT_REPO_PAT are unused in this mode.
 
 name: Build and Release
 
@@ -26,13 +33,20 @@ on:
         default: 'Debian package'
         type: string
       apt-distro:
-        description: 'APT distribution (e.g., trixie, bookworm, any)'
-        required: true
+        description: 'APT distribution (e.g., trixie, bookworm, any). Unused when build-deb is false.'
+        required: false
+        default: 'trixie'
         type: string
       apt-component:
-        description: 'APT component (e.g., main, hatlabs)'
-        required: true
+        description: 'APT component (e.g., main, hatlabs). Unused when build-deb is false.'
+        required: false
+        default: 'main'
         type: string
+      build-deb:
+        description: 'Build and release a .deb (APT). Set false for npm-only repos.'
+        required: false
+        default: true
+        type: boolean
       apt-repository:
         description: 'APT repository to dispatch to'
         required: false
@@ -70,8 +84,8 @@ on:
         type: boolean
     secrets:
       APT_REPO_PAT:
-        description: 'PAT for dispatching to APT repository'
-        required: true
+        description: 'PAT for dispatching to APT repository. Unused when build-deb is false.'
+        required: false
 
 permissions:
   contents: write
@@ -149,6 +163,7 @@ jobs:
           echo "Revision number: $NEXT_REVISION"
 
       - name: Generate debian/changelog
+        if: inputs.build-deb
         run: |
           UPSTREAM="${{ steps.version.outputs.upstream }}"
           REVISION="${{ steps.revision.outputs.revision }}"
@@ -243,11 +258,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: Build .deb package
-        if: steps.check.outputs.action == 'create'
+        if: steps.check.outputs.action == 'create' && inputs.build-deb
         uses: ./.github/actions/build-deb
 
       - name: Run lintian checks
-        if: steps.check.outputs.action == 'create' && inputs.run-lintian
+        if: steps.check.outputs.action == 'create' && inputs.build-deb && inputs.run-lintian
         run: |
           echo "Installing lintian..."
           sudo apt-get update && sudo apt-get install -y lintian
@@ -274,7 +289,7 @@ jobs:
           echo "✅ Lintian checks passed"
 
       - name: Rename packages with distro+component suffix
-        if: steps.check.outputs.action == 'create'
+        if: steps.check.outputs.action == 'create' && inputs.build-deb
         run: |
           DEBIAN_VERSION="${{ steps.versions.outputs.debian_version }}"
 
@@ -369,7 +384,10 @@ jobs:
         if: steps.check.outputs.action == 'create'
         run: |
           PRERELEASE_TAG="${{ steps.versions.outputs.prerelease_tag }}"
-          if ! ls *.deb 1> /dev/null 2>&1; then
+          ASSETS=()
+          if compgen -G "*.deb" > /dev/null; then
+            ASSETS=(*.deb)
+          elif [ "${{ inputs.build-deb }}" = "true" ]; then
             echo "Error: No .deb files found"
             exit 1
           fi
@@ -378,7 +396,7 @@ jobs:
             --prerelease \
             --title "$PRERELEASE_TAG (Pre-release)" \
             --notes-file release_notes.md \
-            *.deb
+            "${ASSETS[@]}"
           echo "Pre-release created successfully"
         env:
           GH_TOKEN: ${{ github.token }}
@@ -461,19 +479,23 @@ jobs:
           if gh release view "$STABLE_TAG" &>/dev/null; then
             echo "Release $STABLE_TAG already exists, skipping creation"
           else
-            echo "Creating draft release $STABLE_TAG with .deb package"
+            ASSETS=()
+            if compgen -G "*.deb" > /dev/null; then
+              ASSETS=(*.deb)
+            fi
+            echo "Creating draft release $STABLE_TAG"
             gh release create "$STABLE_TAG" \
               --draft \
               --title "$STABLE_TAG" \
               --notes-file release_notes.md \
-              *.deb
-            echo "Draft release created successfully with .deb attached"
+              "${ASSETS[@]}"
+            echo "Draft release created successfully"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: Dispatch to APT repository
-        if: steps.check.outputs.action == 'create'
+        if: steps.check.outputs.action == 'create' && inputs.build-deb
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.APT_REPO_PAT }}
@@ -501,11 +523,15 @@ jobs:
           echo "Pre-release URL: https://github.com/${{ github.repository }}/releases/tag/${PRERELEASE_TAG}"
           echo "Draft URL: https://github.com/${{ github.repository }}/releases/tag/${STABLE_TAG}"
           echo ""
-          echo "Pre-release created with .deb package"
-          echo "Draft release created with .deb attached"
-          echo "Dispatched to ${{ inputs.apt-repository }} unstable channel"
+          if [ "${{ inputs.build-deb }}" = "true" ]; then
+            echo "Pre-release created with .deb package"
+            echo "Draft release created with .deb attached"
+            echo "Dispatched to ${{ inputs.apt-repository }} unstable channel"
+          else
+            echo "Pre-release and draft stable release created (npm-only, notes-only)"
+          fi
           echo ""
           echo "To publish stable release:"
-          echo "  1. Test the unstable package"
+          echo "  1. Test the build"
           echo "  2. Publish the draft release in GitHub UI"
-          echo "  3. release.yml will dispatch to stable channel"
+          echo "  3. release.yml handles stable publishing"
