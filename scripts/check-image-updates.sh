@@ -127,8 +127,6 @@ while IFS='|' read -r file service image current_tag; do
     app_dir=$(dirname "$file")
     metadata="$app_dir/metadata.yaml"
     if [ -f "$metadata" ] && [[ "$BUMPED_METADATA" != *"|$metadata|"* ]]; then
-      stripped_tag="${latest#v}"
-      new_meta_ver="${stripped_tag}-1"
       old_meta_ver=$(python3 -c "
 import yaml, sys
 d = yaml.safe_load(open(sys.argv[1]))
@@ -136,8 +134,25 @@ v = d.get('version')
 if v is None: sys.exit(1)
 print(v)
 " "$metadata") || { echo "  metadata.yaml: no version field, skipping"; continue; }
+
+      # Images we build tag as `v<upstream>-halos.<build>`; everything else
+      # carries upstream's own version. Without the split our build revision
+      # lands in upstream_version, which is defined as what upstream released.
+      stripped_tag="${latest#v}"
+      new_upstream="${stripped_tag%%-halos.*}"
+
+      # The app's package revision restarts at 1 on a new upstream version and
+      # advances otherwise -- a new build of the same upstream still has to sort
+      # above the last one, and resetting to 1 would sort below it.
+      old_upstream="${old_meta_ver%-*}"
+      old_rev="${old_meta_ver##*-}"
+      if [ "$new_upstream" = "$old_upstream" ] && [[ "$old_rev" =~ ^[0-9]+$ ]]; then
+        new_meta_ver="${new_upstream}-$((old_rev + 1))"
+      else
+        new_meta_ver="${new_upstream}-1"
+      fi
       # Update version and upstream_version, preserving any YAML quoting style
-      python3 - "$metadata" "$new_meta_ver" "$stripped_tag" << 'PYEOF'
+      python3 - "$metadata" "$new_meta_ver" "$new_upstream" << 'PYEOF'
 import sys
 path, new_ver, new_upstream = sys.argv[1:]
 lines = []
