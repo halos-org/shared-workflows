@@ -39,19 +39,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # github.workflow_ref = "owner/repo/path@refs/heads/branch" — extract the ref
-      # after @ so the scripts checkout matches whichever version the caller pinned.
-      - name: Resolve shared workflow ref
-        id: wf-ref
-        run: echo "ref=${WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-
+      # job_workflow_sha is the commit of *this* reusable workflow file, so the
+      # scripts come from the same revision the caller pinned. github.workflow_ref
+      # names the calling workflow instead, which resolves against the wrong repo
+      # and only appeared to work because both sides have a `main`.
       - name: Checkout shared scripts
         uses: actions/checkout@v4
         with:
           repository: halos-org/shared-workflows
-          ref: ${{ steps.wf-ref.outputs.ref }}
+          ref: ${{ github.job_workflow_sha }}
           path: .shared-workflows
           sparse-checkout: scripts
 
