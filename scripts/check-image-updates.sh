@@ -22,8 +22,19 @@ python3 -c "import yaml" 2>/dev/null || pip install --quiet --break-system-packa
 # Parse images from compose files
 # ---------------------------------------------------------------------------
 
+# Images we publish ourselves are skipped. They live in their own repo so a
+# person reads what changed in the curated contents before it reaches a boat,
+# and a daily cron repinning them on a tag match walks straight past that. Their
+# tags also carry a build revision this script cannot split from the upstream
+# version: `2.30.0-1` yields `version: 2.30.0-2-1` and an `upstream_version` of
+# `2.30.0-2`, which is our build revision, not anything upstream released.
+SELF_BUILT_PREFIXES="${SELF_BUILT_PREFIXES:-ghcr.io/halos-org/ ghcr.io/hatlabs/}"
+export SELF_BUILT_PREFIXES
+
 IMAGES=$(python3 << 'PYEOF'
-import yaml, os, glob
+import sys, yaml, os, glob
+
+prefixes = tuple(os.environ["SELF_BUILT_PREFIXES"].split())
 
 for f in sorted(glob.glob(os.environ["COMPOSE_PATTERN"], recursive=True)):
     with open(f) as fh:
@@ -32,9 +43,14 @@ for f in sorted(glob.glob(os.environ["COMPOSE_PATTERN"], recursive=True)):
         continue
     for name, svc in data.get("services", {}).items():
         img = svc.get("image", "")
-        if ":" in img:
-            ref, tag = img.rsplit(":", 1)
-            print(f"{f}|{name}|{ref}|{tag}")
+        if ":" not in img:
+            continue
+        ref, tag = img.rsplit(":", 1)
+        if ref.startswith(prefixes):
+            print(f"SKIP {f} {ref}: we publish this one; repin it by hand",
+                  file=sys.stderr)
+            continue
+        print(f"{f}|{name}|{ref}|{tag}")
 PYEOF
 )
 
