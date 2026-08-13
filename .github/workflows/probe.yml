@@ -1,0 +1,13 @@
+name: Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  translation-status:
+    uses: ./.github/workflows/translation-status.yml

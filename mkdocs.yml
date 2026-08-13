@@ -1,0 +1,11 @@
+site_name: Probe
+site_url: https://example.invalid/
+plugins:
+  - i18n:
+      docs_structure: folder
+      languages:
+        - locale: en
+          default: true
+          name: English
+        - locale: fi
+          name: Suomi
