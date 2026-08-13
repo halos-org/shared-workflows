@@ -1,0 +1,125 @@
+# Reusable workflow for translated documentation repositories
+# Called by: repo/.github/workflows/translation-status.yml
+#
+# Reports translation status to the job summary, posts that report as a pull
+# request comment, builds the site, checks its anchors, and fails the run when
+# any translation is stale, missing, unstamped or orphaned.
+#
+# Requirements:
+# - Caller repo pins halos-docs-tools in pyproject.toml and commits uv.lock
+#   https://github.com/halos-org/docs-tools
+# - Caller repo has mkdocs.yml with mkdocs-static-i18n and a docs/<locale>/ tree
+# - Caller workflow grants contents: read and pull-requests: write. Without
+#   the second, everything still runs and only the comment is skipped.
+#
+# The step order is deliberate. Everything that can fail the job runs after the
+# comment is posted, so a red run always carries the explanation of why.
+#
+# A repository without translations has no use for this workflow: it consumes
+# halos-docs-tools directly from its own build job instead.
+
+name: Translation Status
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'Runner to use'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+
+# No permissions block: this workflow inherits the caller's token. Declaring one
+# here would set the complete permission set for the job, so requesting
+# pull-requests: write would abort a caller that grants only contents: read
+# before a single step ran, reporting nothing but "a workflow file issue". The
+# gate is the point of this workflow; the comment is best-effort.
+
+jobs:
+  translation-status:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Full history: the report resolves each stamped blob to show what
+          # changed in English since a translation was written. A shallow
+          # clone has no such blob and degrades the diff to a hint.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Report translation status
+        run: |
+          # tee, not plain redirection: a report only in the job summary is
+          # invisible in the logs, which is where you look when it misbehaves.
+          uv run translation-status --format markdown --diff | tee report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment on the pull request
+        if: github.event_name == 'pull_request'
+        # A pull request from a fork gets a read-only token, and a docs
+        # contributor should get a review rather than a broken build. The
+        # comment is an explanation of the verdict, never the verdict itself.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          uv run translation-status --comment > comment.md
+          # --paginate: on a long-running pull request the marker comment is
+          # not necessarily on the first page, and missing it posts a second.
+          existing=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.body | contains("<!-- translation-status -->")) | .id' \
+            | head -1)
+          if [ -n "$existing" ]; then
+            gh api "repos/$REPO/issues/comments/$existing" \
+              -X PATCH -F body=@comment.md --silent
+            echo "Updated comment $existing"
+          else
+            gh api "repos/$REPO/issues/$PR/comments" \
+              -F body=@comment.md --silent
+            echo "Created comment"
+          fi
+
+      - name: Build the site
+        run: uv run mkdocs build --strict
+
+      - name: Check anchors
+        id: anchors
+        # Tolerated here so that a broken anchor does not hide a stale
+        # translation: both are content faults, and an author would rather fix
+        # them in one pass than in two. The last step turns it back into a
+        # failure. GitHub renders a tolerated failure as a green check, which
+        # is why that step repeats the listing rather than pointing here.
+        continue-on-error: true
+        run: |
+          # PIPESTATUS, not $?: piping into tee would otherwise mask the
+          # checker's exit status behind tee's.
+          set +e
+          uv run check-anchors site | tee anchors.txt
+          broken=${PIPESTATUS[0]}
+          set -e
+          {
+            echo ""
+            echo "## Anchor check"
+            echo ""
+            echo '```'
+            cat anchors.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$broken"
+
+      - name: Gate on translation status
+        run: uv run translation-status --check
+
+      - name: Fail on broken anchors
+        if: steps.anchors.outcome == 'failure'
+        run: |
+          cat anchors.txt >&2
+          exit 1

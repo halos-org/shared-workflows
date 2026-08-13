@@ -136,6 +136,53 @@ jobs:
 | `apt-repository` | `hatlabs/apt.hatlabs.fi` | APT repo to dispatch to |
 | `version-pattern` | `^v([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$` | Tag validation regex |
 
+### translation-status.yml
+
+For translated documentation repositories, not Debian packages. Reports which
+translations are behind their English source, posts that report as a pull
+request comment, builds the site, checks its anchors, and fails the run when any
+translation is stale, missing, unstamped or orphaned.
+
+```yaml
+# .github/workflows/translation-status.yml
+name: Translation Status
+
+on:
+  pull_request:
+    paths: ['docs/**', 'mkdocs.yml', 'pyproject.toml', 'uv.lock']
+  push:
+    branches: [main]
+
+# The called workflow inherits this token. Omit pull-requests: write and the
+# run still gates; only the comment is skipped.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  translation-status:
+    uses: halos-org/shared-workflows/.github/workflows/translation-status.yml@main
+```
+
+**Inputs:**
+| Input | Default | Description |
+|-------|---------|-------------|
+| `runs-on` | `ubuntu-latest` | Runner to use |
+
+**Requirements:**
+- `pyproject.toml` pins [halos-docs-tools](https://github.com/halos-org/docs-tools)
+  to a tag, and `uv.lock` is committed
+- `mkdocs.yml` configures `mkdocs-static-i18n` with a `docs/<locale>/` tree
+
+The checkers come from the package, so the same commands run on a laptop before
+you push. Glossaries and per-language rules stay in the documentation
+repository.
+
+A repository without translations has no use for this workflow — the status
+checker needs the i18n configuration to know what to compare. Such a repository
+consumes the package directly from its own build job instead, for example to run
+`check-anchors` on the built site.
+
 ## Repository Requirements
 
 Each repository using these workflows must have:

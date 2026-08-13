@@ -1,0 +1,27 @@
+name: Translation Status
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# The called workflow inherits this token, so the comment needs
+# pull-requests: write here. Omit it and the run still gates; only the comment
+# is skipped.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: translation-status-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  translation-status:
+    uses: halos-org/shared-workflows/.github/workflows/translation-status.yml@main
