@@ -1,5 +1,7 @@
 site_name: Probe
 site_url: https://example.invalid/
+theme:
+  name: material
 plugins:
   - i18n:
       docs_structure: folder
