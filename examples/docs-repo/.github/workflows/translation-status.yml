@@ -1,0 +1,28 @@
+name: Translation Status
+
+# No paths filter. The gate is a property of the whole repository, not of a
+# diff, and a required check that never runs on a pull request touching none of
+# the filtered paths leaves that pull request unmergeable forever.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# The called workflow inherits this token, so the comment needs
+# pull-requests: write here. Omit it and the run still gates; only the comment
+# is skipped.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: translation-status-${{ github.ref }}
+  # Pull requests only. On push, github.ref is refs/heads/main for every merge,
+  # so cancelling lets one merge kill the run checking the one before it -- and
+  # a cancelled run is grey, not red, so nobody is told.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  translation-status:
+    uses: halos-org/shared-workflows/.github/workflows/translation-status.yml@main
