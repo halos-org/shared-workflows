@@ -1,14 +1,19 @@
 # Hat Labs Shared Workflows
 
-Reusable GitHub Actions workflows for the pr-main-release strategy used across Hat Labs repositories.
+Reusable GitHub Actions workflows for two classes of Hat Labs repository: those
+that build Debian packages, and documentation sites.
 
 ## Overview
 
-These workflows implement a standardized release process:
+Most of these workflows implement a standardized release process for Debian
+packages:
 
 1. **PR** → Run tests
 2. **Merge to main** → Build .deb, create pre-release, dispatch to APT unstable
 3. **Publish release** → Dispatch to APT stable
+
+`translation-status.yml` is the exception. It serves translated documentation
+repositories and has nothing to do with packaging.
 
 ## Workflows
 
@@ -136,9 +141,84 @@ jobs:
 | `apt-repository` | `hatlabs/apt.hatlabs.fi` | APT repo to dispatch to |
 | `version-pattern` | `^v([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$` | Tag validation regex |
 
-## Repository Requirements
+### translation-status.yml
 
-Each repository using these workflows must have:
+For translated documentation repositories, not Debian packages. Reports which
+translations are behind their English source, posts that report as a pull
+request comment, builds the site, checks its anchors, and fails the run when any
+translation is stale, missing, unstamped or orphaned.
+
+Copy the caller from `examples/docs-repo/.github/workflows/translation-status.yml`.
+The stanza that selects this workflow is:
+
+```yaml
+# The called workflow inherits this token. Omit pull-requests: write and the
+# run still gates; only the comment is skipped.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  translation-status:
+    uses: halos-org/shared-workflows/.github/workflows/translation-status.yml@main
+```
+
+**Inputs:**
+| Input | Default | Description |
+|-------|---------|-------------|
+| `runs-on` | `ubuntu-latest` | Runner to use |
+
+**Requirements** — none of these is validated, so getting one wrong shows up as
+a failing step rather than a clear message:
+- `pyproject.toml` pins [halos-docs-tools](https://github.com/halos-org/docs-tools)
+  to a tag, and `uv.lock` is committed. The workflow runs `uv sync --locked`, so
+  the two must agree.
+- `mkdocs` and `mkdocs-static-i18n` are project dependencies. The package brings
+  the checkers, not mkdocs.
+- `mkdocs.yml` configures `mkdocs-static-i18n` with a `docs/<locale>/` tree, and
+  leaves `site_dir` at its default — the anchor check reads `site`.
+- The caller grants `pull-requests: write` if it wants the comment.
+
+**What it enforces.** Every translation carries the git blob hash of the English
+page it was written against. The checker compares hashes; it cannot read the
+translated text. A commit that only rewrites the stamp therefore turns the gate
+green and makes that page's staleness permanently invisible — and the bot
+comment prints the hash needed to do it, because that is also what an honest
+update needs. Catching a stamp-only diff is a reviewer's job.
+
+**Making it a gate.** Nothing here makes the check required; that is a branch
+protection rule in the consuming repository. The check is named `<your job id> /
+translation-status`. Two things to know before enabling it: the example
+deliberately carries no `paths` filter, because a required check that never runs
+on a PR touching none of the filtered paths leaves that PR unmergeable forever;
+and the gate reads the repository as it stood when the run started, so two
+independently green PRs can merge into a stale `main`. Require branches to be up
+to date before merging, or use a merge queue — which needs a `merge_group`
+trigger the example does not have.
+
+The checkers come from the package, so the same commands run on a laptop before
+you push. Glossaries and per-language rules stay in the documentation
+repository.
+
+This workflow builds and runs pull request code, including code from forks, so
+callers should leave it on GitHub-hosted runners and must not switch the trigger
+to `pull_request_target`.
+
+A repository without translations has no use for this workflow — the status
+checker needs the i18n configuration to know what to compare. Such a repository
+consumes the package directly from its own build job instead, for example to run
+`check-anchors` on the built site.
+
+`hatlabs` documentation repositories call this copy rather than the one in
+`hatlabs/shared-workflows`. The one-org-per-copy rule exists to keep the APT
+inputs straight, and this workflow has none; a single copy is deliberate.
+
+## Repository Requirements (Debian package workflows)
+
+Each repository using `pr-checks.yml`, `build-release.yml` or
+`publish-stable.yml` must have the following. A documentation repository calling
+`translation-status.yml` needs none of them — its requirements are listed in
+that workflow's section above.
 
 ### 1. VERSION file
 

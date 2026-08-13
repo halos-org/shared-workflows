@@ -1,0 +1,164 @@
+# Reusable workflow for translated documentation repositories
+# Called by: repo/.github/workflows/translation-status.yml
+#
+# See the translation-status.yml section of README.md for what it does, what a
+# caller must provide, and the caller stanza to copy.
+#
+# The step order is deliberate. Everything that can fail the job runs after the
+# comment is posted, so a red run always carries the explanation of why.
+#
+# What the gate enforces is that every translation carries the blob hash of the
+# English page it was written against. It cannot read the translated text, so a
+# commit that only rewrites the stamp turns it green and makes the staleness
+# permanently invisible. That one is a reviewer's job, not this workflow's.
+
+name: Translation Status
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'Runner to use'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+
+# No permissions block: this workflow inherits the caller's token. Declaring one
+# here would set the complete permission set for the job, so requesting
+# pull-requests: write would abort a caller that grants only contents: read
+# before a single step ran, reporting nothing but "a workflow file issue". The
+# gate is the point of this workflow; the comment is best-effort.
+
+jobs:
+  # Renaming this job renames the status check in every consuming repository,
+  # which silently breaks any branch protection rule naming it.
+  translation-status:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 20
+    steps:
+      # pull_request_target checks out the base branch, so the gate would grade
+      # main and pass on every pull request without examining its changes. The
+      # plausible route there is a maintainer reaching for it to make the
+      # comment work on fork pull requests, which it does not.
+      - name: Refuse an event this gate cannot judge
+        if: >-
+          github.event_name != 'pull_request'
+          && github.event_name != 'push'
+          && github.event_name != 'workflow_dispatch'
+        run: |
+          echo "Triggered by ${{ github.event_name }}." >&2
+          echo "This workflow must see the pull request's own content." >&2
+          echo "pull_request_target grades the base branch and always passes." >&2
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Full history: the report resolves each stamped blob to show what
+          # changed in English since a translation was written. A shallow
+          # clone has no such blob and degrades the diff to a hint.
+          fetch-depth: 0
+          # Later steps run code this repository does not control at review
+          # time -- dependency build backends under uv sync, plugins under
+          # mkdocs build. Without this the job token stays readable by all of
+          # them in .git/config. Nothing here needs it after the clone.
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        # --locked, so a pyproject that has drifted from the lock file fails
+        # here instead of resolving to some other version of the checkers. The
+        # gate's meaning rests on their exit statuses.
+        run: uv sync --locked
+
+      - name: Report translation status
+        run: |
+          # tee, not plain redirection: a report only in the job summary is
+          # invisible in the logs, which is where you look when it misbehaves.
+          # PIPESTATUS because the runner shell is bash -e without pipefail, so
+          # a crashing reporter would otherwise pass as tee's own exit 0.
+          set +e
+          uv run translation-status --format markdown --diff 2>&1 | tee report.md
+          reported=${PIPESTATUS[0]}
+          set -e
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$reported"
+
+      - name: Comment on the pull request
+        if: github.event_name == 'pull_request'
+        # A pull request from a fork gets a read-only token, and a docs
+        # contributor should get a review rather than a broken build. The
+        # comment is an explanation of the verdict, never the verdict itself.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          uv run translation-status --comment > comment.md
+          # Match on author as well as marker: anyone who can comment on the
+          # pull request could otherwise post the marker first and have every
+          # run patch their text instead.
+          #
+          # Assigned without a pipe so that a failed listing fails this step
+          # rather than reading as "no comment yet" -- that would turn one
+          # transient API error into a second, permanent comment. --paginate
+          # because on a long pull request the marker is not on the first page.
+          ids=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[]
+                  | select(.user.login == "github-actions[bot]")
+                  | select(.body | contains("<!-- translation-status -->"))
+                  | .id')
+          existing=$(printf '%s\n' "$ids" | head -1)
+          if [ -n "$existing" ]; then
+            gh api "repos/$REPO/issues/comments/$existing" \
+              -X PATCH -F body=@comment.md --silent
+            echo "Updated comment $existing"
+          else
+            gh api "repos/$REPO/issues/$PR/comments" \
+              -F body=@comment.md --silent
+            echo "Created comment"
+          fi
+
+      - name: Build the site
+        run: uv run mkdocs build --strict
+
+      - name: Check anchors
+        id: anchors
+        # Tolerated here so that a broken anchor does not hide a stale
+        # translation: both are content faults, and an author would rather fix
+        # them in one pass than in two. The last step turns it back into a
+        # failure. GitHub renders a tolerated failure as a green check, which
+        # is why that step repeats the listing rather than pointing here.
+        continue-on-error: true
+        run: |
+          # 2>&1 because the checker reports "could not run" on stderr. Without
+          # it that case reaches the summary and the failing step as an empty
+          # block, and a red run with no stated cause is the one thing this
+          # step order exists to prevent.
+          set +e
+          uv run check-anchors site 2>&1 | tee anchors.txt
+          broken=${PIPESTATUS[0]}
+          set -e
+          {
+            echo ""
+            echo "## Anchor check"
+            echo ""
+            echo '```'
+            cat anchors.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$broken"
+
+      - name: Gate on translation status
+        run: uv run translation-status --check
+
+      - name: Fail on broken anchors
+        # always(), so that a failing gate does not skip this and leave the
+        # anchor breakage visible only on a step GitHub renders green.
+        if: always() && steps.anchors.outcome == 'failure'
+        run: |
+          cat anchors.txt >&2
+          exit 1
