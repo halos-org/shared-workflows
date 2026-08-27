@@ -26,3 +26,18 @@ concurrency:
 jobs:
   translation-status:
     uses: halos-org/shared-workflows/.github/workflows/translation-status.yml@main
+
+  # A reusable-workflow call reports as `<caller job> / <called job>`, so the
+  # check name is not the caller's to choose and changes if the called job is
+  # ever renamed. Carrying the required context on a plain job of your own
+  # decouples branch protection from both. Drop this job if you would rather
+  # require `translation-status / translation-status` directly.
+  status:
+    needs: translation-status
+    # always(), or a failed gate leaves this skipped, and a skipped required
+    # check never reports either. GitHub waits on a required context forever.
+    if: always()
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[ "${{ needs.translation-status.result }}" = "success" ]'

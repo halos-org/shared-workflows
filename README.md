@@ -188,9 +188,14 @@ update needs. Catching a stamp-only diff is a reviewer's job.
 
 **Making it a gate.** Nothing here makes the check required; that is a branch
 protection rule in the consuming repository. The check is named `<your job id> /
-translation-status`. Two things to know before enabling it: the example
-deliberately carries no `paths` filter, because a required check that never runs
-on a PR touching none of the filtered paths leaves that PR unmergeable forever;
+translation-status`, which is a name a caller cannot choose freely: a
+reusable-workflow call always reports as `<caller job> / <called job>`. A
+repository that already requires some other context, or that would rather not
+tie its protection to a job name in this repository, can carry the name on a
+job of its own that depends on this one — see the caller example. Two more
+things to know before enabling it: the example deliberately carries no `paths`
+filter, because a required check that never runs on a PR touching none of the
+filtered paths leaves that PR unmergeable forever;
 and the gate reads the repository as it stood when the run started, so two
 independently green PRs can merge into a stale `main`. Require branches to be up
 to date before merging, or use a merge queue — which needs a `merge_group`
