@@ -21,6 +21,11 @@ on:
 permissions:
   contents: read
 
+# Run steps with -eo pipefail rather than the implicit bash -e.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   tests:
     runs-on: ${{ inputs.runs-on }}
