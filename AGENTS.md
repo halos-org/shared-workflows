@@ -14,7 +14,11 @@ A caller depends on:
 
 - workflow filenames under `.github/workflows/`
 - `workflow_call` inputs, secrets, and outputs
-- the repo-local actions a caller must provide (`.github/actions/run-tests`, `build-deb`, `check-versions`)
+- the repo-local actions a caller provides: `.github/actions/run-tests`, `build-deb` for Debian packages, and the optional `check-versions`
+- the arguments passed to optional `.github/scripts/` overrides, and the files they must write
+- the permissions a calling job must grant
+- the `concurrency` group with `cancel-in-progress: false` that a caller's `main.yml` must set, because `release-version.yml` computes the revision from existing tags
+- the `VERSION` file and the `v<upstream>+<N>` and `v<upstream>+<N>_pre` tag formats
 
 Changing any of these incompatibly is a breaking change and ships as a new major version.
 

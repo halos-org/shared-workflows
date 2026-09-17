@@ -84,12 +84,9 @@ reviews:
 
     - path: "examples/**"
       instructions: |
-        Examples are copied into calling repositories. `examples/deb` and
-        `examples/npm` show the v1 interface: flag a call to a legacy workflow
-        or an `@main` pin there, and a `pr.yml` whose `status` job does not
-        need every other job. `examples/cockpit-apt` shows the legacy
-        workflows and `examples/docs-repo` still pins `@main` until the v1
-        documentation work in issue 54 replaces them; do not flag either.
+        Examples are copied into calling repositories. Flag a call to a
+        legacy workflow, a pin other than `@v1`, and a `status` job that does
+        not need every other job in its file.
 
 knowledge_base:
   code_guidelines:
