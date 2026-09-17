@@ -106,7 +106,7 @@ jobs:
                   | grep -v -E '^(docker/|Dockerfile|config\.)' \
                   | grep -v -E '^(tools/|run$|Makefile$|Taskfile\.yml$)' \
                   | grep -v -E '^(store/)' \
-                  | grep -v -E '\.(lock)$' \
+                  | grep -v -E '(\.lock|(^|/)package-lock\.json)$' \
                   | grep -v -E '\.lintian-overrides$' \
                   || true)
 
