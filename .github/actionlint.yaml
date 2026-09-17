@@ -1,6 +1,7 @@
+# actionlint 1.7.12 predates the job.workflow_* context properties. The pattern
+# names the job context's object type so other contexts still fail. Remove it
+# when ACTIONLINT_VERSION in ci.yml reaches a release that knows them.
 paths:
   .github/workflows/check-image-updates.yml:
     ignore:
-      # The property does not exist; remove with the fix for
-      # https://github.com/halos-org/shared-workflows/issues/58
-      - 'property "job_workflow_sha" is not defined'
+      - 'property "workflow_(repository|sha)" is not defined in object type \{check_run_id: '

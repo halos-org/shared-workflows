@@ -39,15 +39,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # job_workflow_sha is the commit of *this* reusable workflow file, so the
-      # scripts come from the same revision the caller pinned. github.workflow_ref
-      # names the calling workflow instead, which resolves against the wrong repo
-      # and only appeared to work because both sides have a `main`.
+      # job.workflow_* describe this reusable workflow file, so the scripts come
+      # from the revision the caller pinned. The github.workflow_* properties
+      # describe the calling workflow instead.
       - name: Checkout shared scripts
         uses: actions/checkout@v4
         with:
-          repository: halos-org/shared-workflows
-          ref: ${{ github.job_workflow_sha }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .shared-workflows
           sparse-checkout: scripts
 

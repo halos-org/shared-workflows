@@ -1,0 +1,98 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+language: en-US
+
+# Under 250 characters, the schema's limit.
+tone_instructions: >-
+  Name the trigger, the code path, and the consequence for a caller for every
+  finding. If you cannot name one, do not raise it. No praise, no preamble, no
+  restating the diff.
+
+reviews:
+  profile: assertive
+  poem: false
+  in_progress_fortune: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+  high_level_summary_instructions: |
+    Write in present tense. Lead with what changes for a calling repository,
+    not with the file list. Do not restate the PR description.
+
+  pre_merge_checks:
+    # Quoted: bare `off` is a YAML 1.1 boolean, and this field takes a string.
+    docstrings:
+      mode: "off"
+    description:
+      mode: "off"
+
+  tools:
+    # ci.yml runs actionlint and shellcheck with this repository's settings.
+    actionlint:
+      enabled: false
+    shellcheck:
+      enabled: false
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        ## Project rules
+        AGENTS.md defines the caller interface, the frozen legacy workflows,
+        the versioning policy and the privacy rule. Flag a change that breaks
+        one of them.
+
+        ## Ref pinning
+        Flag anything in a reusable workflow that resolves files, scripts or
+        nested workflows from `main` or from the caller instead of from the
+        pinned revision. `github.workflow_*` describes the calling workflow;
+        `job.workflow_*` describes the reusable workflow file.
+
+        ## Evaluation traps
+        Flag a reference to a context property that does not exist: it
+        evaluates to an empty string without an error. Flag a `run:` step
+        whose pipeline can hide a failure: without an explicit `shell:`,
+        steps run as `bash -e {0}` without pipefail. Flag a job-level
+        concurrency group that can equal a caller's workflow-level group,
+        which deadlocks the run.
+
+        ## Defaults
+        Hat Labs-specific behaviour belongs in callers' inputs, not in
+        defaults here. Flag a default that favours one organisation.
+
+        ## Comments
+        A comment explains why the code is the way it is, never what changed.
+        Flag comments that narrate the change or restate the code.
+
+        ## Do not ask for these
+        - A VERSION bump or a CHANGELOG. Releases are created by hand as
+          GitHub releases.
+        - SHA-pinning third-party actions. It is out of scope.
+        - A test that runs a reusable workflow from this repository. That is
+          not possible; changes are verified from a caller's run, reported in
+          the PR description.
+
+    - path: "tests/**"
+      instructions: |
+        Tests extract workflow steps and run them against throwaway git
+        repositories with fake tool shims in `tests/lib/`. Flag a test that
+        cannot fail when the step it covers is broken.
+
+    - path: "examples/**"
+      instructions: |
+        Examples are copied into calling repositories. `examples/deb` and
+        `examples/npm` show the v1 interface: flag a call to a legacy workflow
+        or an `@main` pin there, and a `pr.yml` whose `status` job does not
+        need every other job. `examples/cockpit-apt` shows the legacy
+        workflows and `examples/docs-repo` still pins `@main` until the v1
+        documentation work in issue 54 replaces them; do not flag either.
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - AGENTS.md
