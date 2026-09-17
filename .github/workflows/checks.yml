@@ -1,0 +1,56 @@
+# Reusable PR checks for every caller, packaged or not.
+#
+# Requirements:
+# - .github/actions/run-tests/action.yml in the caller repository
+# - .github/actions/check-versions/action.yml (or .yaml) is optional
+#
+# Deb repositories also call build-deb.yml. Callers gate branch protection on
+# a status job of their own; the job names here are not part of the interface.
+
+name: Checks
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'Runner to use for every job'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+
+  version-check:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if check-versions action exists
+        id: check-action
+        run: |
+          if [ -f .github/actions/check-versions/action.yml ] || [ -f .github/actions/check-versions/action.yaml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check version consistency
+        if: steps.check-action.outputs.exists == 'true'
+        uses: ./.github/actions/check-versions
+
+  version-bump-check:
+    uses: ./.github/workflows/version-bump-check.yml
+    with:
+      runs-on: ${{ inputs.runs-on }}

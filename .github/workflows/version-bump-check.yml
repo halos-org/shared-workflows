@@ -1,5 +1,5 @@
 # Reusable workflow for version bump checks
-# Can be called standalone or from pr-checks.yml
+# Can be called standalone, from checks.yml, or from the legacy pr-checks.yml
 #
 # Checks:
 # - App-level (apps/*/metadata.yaml): per-PR, requires metadata bump when app files change
