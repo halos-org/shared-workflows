@@ -1,0 +1,30 @@
+# Point the major tag (v1, v2, ...) at each newly published full release.
+# Releases of this repository are created by hand; see AGENTS.md.
+
+name: Move major tag
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: move-major-tag
+  cancel-in-progress: false
+
+jobs:
+  move-major-tag:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move major tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: scripts/move-major-tag.sh "$TAG"
