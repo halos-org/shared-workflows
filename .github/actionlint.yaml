@@ -1,0 +1,6 @@
+paths:
+  .github/workflows/check-image-updates.yml:
+    ignore:
+      # The property does not exist; remove with the fix for
+      # https://github.com/halos-org/shared-workflows/issues/58
+      - 'property "job_workflow_sha" is not defined'

@@ -1,0 +1,65 @@
+# CI for this repository's own workflows and scripts.
+# Not a reusable workflow: callers never reference it.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  ACTIONLINT_VERSION: 1.7.12
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          bash <(curl -sSfL "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash") "$ACTIONLINT_VERSION"
+
+      - name: Lint workflows and examples
+        # Info and style findings in the legacy workflows are not worth
+        # editing files that callers on @main still run.
+        env:
+          SHELLCHECK_OPTS: --severity=warning
+        run: ./actionlint -color .github/workflows/*.yml examples/*/.github/workflows/*.yml
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh tests/*.sh
+
+      - name: Run script tests
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          for t in tests/*.test.sh; do
+            echo "== $t"
+            "$t"
+          done
+
+  # Branch protection requires this job only, so renaming the jobs above
+  # does not change the required check.
+  status:
+    needs: [actionlint, scripts]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - run: '[ "${{ needs.actionlint.result }}" = success ] && [ "${{ needs.scripts.result }}" = success ]'
