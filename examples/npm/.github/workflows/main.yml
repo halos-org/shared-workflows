@@ -1,0 +1,42 @@
+name: Main branch release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Required: release-version.yml computes the next revision from existing tags,
+# so two concurrent runs would compute the same one.
+concurrency:
+  group: ${{ github.repository }}-main-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Optional: omit for repositories without tests.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/run-tests
+
+  version:
+    needs: tests
+    uses: halos-org/shared-workflows/.github/workflows/release-version.yml@v1
+
+  # Notes-only releases: publishing the draft starts release.yml.
+  stage-release:
+    needs: version
+    permissions:
+      contents: write
+    uses: halos-org/shared-workflows/.github/workflows/stage-release.yml@v1
+    with:
+      package-name: my-package
+      package-description: One-line description of my-package
+      debian-version: ${{ needs.version.outputs.debian-version }}
+      prerelease-tag: ${{ needs.version.outputs.prerelease-tag }}
+      stable-tag: ${{ needs.version.outputs.stable-tag }}
