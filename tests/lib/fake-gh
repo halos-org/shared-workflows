@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Fake gh for release tests. Releases are JSON files in $FAKE_GH_STATE named
+# after their tag; every call is appended to $FAKE_GH_STATE/calls.log.
+set -euo pipefail
+
+STATE=${FAKE_GH_STATE:?}
+echo "$*" >> "$STATE/calls.log"
+
+release_file() { printf '%s/%s.json' "$STATE" "$1"; }
+
+[ "$1" = release ] || { echo "fake gh: unsupported: $*" >&2; exit 2; }
+shift
+cmd=$1
+shift
+
+case "$cmd" in
+  list)
+    jq -s '.' "$STATE"/*.json 2>/dev/null || echo '[]'
+    ;;
+  view)
+    tag=$1
+    if [ ! -f "$(release_file "$tag")" ]; then
+      echo "release not found" >&2
+      exit 1
+    fi
+    cat "$(release_file "$tag")"
+    ;;
+  delete)
+    rm -f "$(release_file "$1")"
+    ;;
+  create)
+    tag=$1
+    shift
+    draft=false prerelease=false target='' assets=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --draft) draft=true ;;
+        --prerelease) prerelease=true ;;
+        --target) target=$2; shift ;;
+        --title|--notes-file) shift ;;
+        *) assets+=("$(basename "$1")") ;;
+      esac
+      shift
+    done
+    [ "${FAKE_GH_FAIL_CREATE:-}" = "$tag" ] && { echo "upload failed" >&2; exit 1; }
+    jq -n --arg tag "$tag" --argjson draft "$draft" --argjson pre "$prerelease" \
+      --arg target "$target" '$ARGS.positional | {tagName: $tag, isDraft: $draft,
+        isPrerelease: $pre, targetCommitish: $target, assets: map({name: .})}' \
+      --args "${assets[@]}" > "$(release_file "$tag")"
+    ;;
+  *)
+    echo "fake gh: unsupported: release $cmd" >&2
+    exit 2
+    ;;
+esac

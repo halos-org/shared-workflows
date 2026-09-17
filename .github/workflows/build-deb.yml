@@ -4,8 +4,19 @@
 # on every package found in the repository root or build/. A build that
 # produces no package fails.
 #
+# Check mode (PRs): call without release inputs. Nothing is uploaded.
+#
+# Release mode (main): pass revision and the other release inputs, normally
+# from release-version.yml. The workflow then generates debian/changelog
+# before building, renames packages with a +<distro>+<component> suffix, and
+# uploads them as the artifact named in the `artifact` output.
+#
 # Requirements:
 # - .github/actions/build-deb/action.yml in the caller repository
+#
+# Optional caller scripts:
+# - .github/scripts/generate-changelog.sh --upstream <v> --revision <n>
+# - .github/scripts/rename-packages.sh --version <v> --distro <d> --component <c>
 
 name: Build Debian package
 
@@ -22,16 +33,129 @@ on:
         required: false
         default: true
         type: boolean
+      revision:
+        description: 'Release mode: revision N. Leave empty for check mode.'
+        required: false
+        default: ''
+        type: string
+      upstream-version:
+        description: 'Release mode: upstream version'
+        required: false
+        default: ''
+        type: string
+      package-name:
+        description: 'Release mode: Debian package name used in the changelog and default rename'
+        required: false
+        default: ''
+        type: string
+      apt-distro:
+        description: 'Release mode: APT distribution for the package name suffix (e.g. trixie, any)'
+        required: false
+        default: ''
+        type: string
+      apt-component:
+        description: 'Release mode: APT component for the package name suffix (e.g. main, hatlabs)'
+        required: false
+        default: ''
+        type: string
+      maintainer-name:
+        description: 'Release mode: maintainer name for debian/changelog'
+        required: false
+        default: ''
+        type: string
+      maintainer-email:
+        description: 'Release mode: maintainer email for debian/changelog'
+        required: false
+        default: ''
+        type: string
+    outputs:
+      artifact:
+        description: 'Release mode: name of the uploaded package artifact. Empty in check mode.'
+        value: ${{ jobs.build-deb.outputs.artifact }}
 
 permissions:
   contents: read
 
+env:
+  ARTIFACT_NAME: deb-packages
+
+# Run steps with -eo pipefail rather than the implicit bash -e.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-deb:
     runs-on: ${{ inputs.runs-on }}
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id && env.ARTIFACT_NAME || '' }}
+    env:
+      RELEASE_MODE: ${{ inputs.revision != '' }}
+      REVISION: ${{ inputs.revision }}
+      UPSTREAM: ${{ inputs.upstream-version }}
+      PACKAGE_NAME: ${{ inputs.package-name }}
+      APT_DISTRO: ${{ inputs.apt-distro }}
+      APT_COMPONENT: ${{ inputs.apt-component }}
+      MAINTAINER_NAME: ${{ inputs.maintainer-name }}
+      MAINTAINER_EMAIL: ${{ inputs.maintainer-email }}
     steps:
+      - name: Validate inputs
+        run: |
+          given=() missing=()
+          for name in UPSTREAM PACKAGE_NAME APT_DISTRO APT_COMPONENT MAINTAINER_NAME MAINTAINER_EMAIL; do
+            if [ -n "${!name}" ]; then given+=("$name"); else missing+=("$name"); fi
+          done
+          if [ "$RELEASE_MODE" = true ] && [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Release mode (revision set) also needs: ${missing[*]}"
+            exit 1
+          fi
+          if [ "$RELEASE_MODE" != true ] && [ "${#given[@]}" -gt 0 ]; then
+            echo "::error::Release inputs given without revision: ${given[*]}. Pass revision for release mode, or none of them for check mode."
+            exit 1
+          fi
+          echo "Release mode: $RELEASE_MODE"
+
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Release mode reads tags for the changelog.
+          fetch-depth: ${{ inputs.revision == '' && 1 || 0 }}
+          persist-credentials: false
+
+      - name: Generate debian/changelog
+        if: inputs.revision != ''
+        run: |
+          if [ -f .github/scripts/generate-changelog.sh ]; then
+            echo "Using local generate-changelog.sh"
+            .github/scripts/generate-changelog.sh --upstream "$UPSTREAM" --revision "$REVISION"
+            exit 0
+          fi
+
+          # lintian's debian-changelog-line-too-long warning is fatal, so fold
+          # commit subjects into bullets that fit in 80 columns.
+          wrap_changes() {
+            while IFS= read -r subject; do
+              [ -z "$subject" ] && continue
+              printf '%s\n' "$subject" \
+                | fold -s -w 76 \
+                | sed -e 's/[[:space:]]*$//' -e '1s/^/  * /' -e '1!s/^/    /'
+            done
+          }
+
+          LAST_TAG=$(git tag --merged HEAD -l "v*" --sort=-version:refname | grep -v "_pre" | head -n1 || true)
+          if [ -n "$LAST_TAG" ]; then
+            CHANGES=$(git log "${LAST_TAG}..HEAD" --pretty=tformat:"%s" --no-merges -- | wrap_changes)
+          else
+            CHANGES=$(git log -10 --pretty=tformat:"%s" --no-merges | wrap_changes)
+          fi
+          [ -z "$CHANGES" ] && CHANGES="  * Build ${REVISION}"
+
+          {
+            printf '%s (%s-%s) unstable; urgency=medium\n\n' "$PACKAGE_NAME" "$UPSTREAM" "$REVISION"
+            printf '%s\n\n' "$CHANGES"
+            printf ' -- %s <%s>  %s\n' "$MAINTAINER_NAME" "$MAINTAINER_EMAIL" "$(date -R)"
+          } > debian/changelog
+          cat debian/changelog
 
       - name: Build .deb package
         uses: ./.github/actions/build-deb
@@ -73,3 +197,36 @@ jobs:
             echo "::error::Lintian found issues. To suppress specific tags, create debian/<package>.lintian-overrides"
             exit 1
           fi
+
+      - name: Rename packages with distro and component suffix
+        if: inputs.revision != ''
+        run: |
+          DEBIAN_VERSION="${UPSTREAM}-${REVISION}"
+          if [ -f .github/scripts/rename-packages.sh ]; then
+            echo "Using local rename-packages.sh"
+            .github/scripts/rename-packages.sh --version "$DEBIAN_VERSION" --distro "$APT_DISTRO" --component "$APT_COMPONENT"
+            exit 0
+          fi
+
+          OLD_NAME="${PACKAGE_NAME}_${DEBIAN_VERSION}_all.deb"
+          NEW_NAME="${PACKAGE_NAME}_${DEBIAN_VERSION}_all+${APT_DISTRO}+${APT_COMPONENT}.deb"
+          for dir in . build; do
+            if [ -f "$dir/$OLD_NAME" ]; then
+              mv "$dir/$OLD_NAME" "$dir/$NEW_NAME"
+              echo "Renamed $dir/$OLD_NAME -> $dir/$NEW_NAME"
+              exit 0
+            fi
+          done
+          echo "::error::Expected package $OLD_NAME not found in the repository root or build/"
+          exit 1
+
+      - name: Upload packages
+        id: upload
+        if: inputs.revision != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            *.deb
+            build/*.deb
+          if-no-files-found: error

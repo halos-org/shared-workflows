@@ -1,0 +1,123 @@
+# Reusable release version calculation.
+#
+# Reads VERSION and finds the revision N for this commit: the revision of a
+# v<upstream>+N_pre tag that already points at HEAD (a rerun resumes that
+# release), otherwise the highest N over existing v<upstream>+N and
+# v<upstream>+N_pre tags plus one, or 1 when none exist.
+#
+# Releases are cut only from the default branch, because the tags
+# stage-release.yml creates point at the commit this run built. Callers must
+# serialize main runs with a concurrency group, or two runs can compute the
+# same N; stage-release.yml then fails the second one. A run for a commit
+# older than an already released commit fails.
+
+name: Release version
+
+on:
+  workflow_call:
+    inputs:
+      version-file:
+        description: 'Path to the VERSION file'
+        required: false
+        default: 'VERSION'
+        type: string
+      runs-on:
+        description: 'Runner to use'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+    outputs:
+      upstream-version:
+        description: 'Upstream version from the VERSION file, without a v prefix'
+        value: ${{ jobs.version.outputs.upstream-version }}
+      revision:
+        description: 'Revision number N for this commit'
+        value: ${{ jobs.version.outputs.revision }}
+      debian-version:
+        description: '<upstream>-<N>'
+        value: ${{ jobs.version.outputs.debian-version }}
+      prerelease-tag:
+        description: 'v<upstream>+<N>_pre'
+        value: ${{ jobs.version.outputs.prerelease-tag }}
+      stable-tag:
+        description: 'v<upstream>+<N>'
+        value: ${{ jobs.version.outputs.stable-tag }}
+
+permissions:
+  contents: read
+
+# Run steps with -eo pipefail rather than the implicit bash -e.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      upstream-version: ${{ steps.version.outputs.upstream }}
+      revision: ${{ steps.version.outputs.revision }}
+      debian-version: ${{ steps.version.outputs.debian_version }}
+      prerelease-tag: ${{ steps.version.outputs.prerelease_tag }}
+      stable-tag: ${{ steps.version.outputs.stable_tag }}
+    steps:
+      - name: Require the default branch
+        env:
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::Releases are cut only from $DEFAULT_BRANCH; this run is on $REF"
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Calculate version and revision
+        id: version
+        env:
+          VERSION_FILE: ${{ inputs.version-file }}
+        run: |
+          UPSTREAM=$(tr -d '[:space:]' < "$VERSION_FILE")
+          UPSTREAM="${UPSTREAM#v}"
+          # Debian upstream-version characters, without + and _ which the tags use.
+          if ! [[ $UPSTREAM =~ ^[0-9][0-9A-Za-z.~-]*$ ]]; then
+            echo "::error::$VERSION_FILE must hold a version such as 1.2.3, got '$UPSTREAM'"
+            exit 1
+          fi
+
+          # A run for a commit older than an existing release (for example a
+          # re-run of an old main run) would release stale code under a
+          # higher revision.
+          NEWER_TAG=$(comm -23 <(git tag --contains HEAD -l "v*+*" | sort) \
+            <(git tag --points-at HEAD -l "v*+*" | sort) | head -n1)
+          if [ -n "$NEWER_TAG" ]; then
+            echo "::error::A newer commit is already released as $NEWER_TAG; this run is for an older commit"
+            exit 1
+          fi
+
+          RELEASED_TAG=$(git tag --points-at HEAD -l "v${UPSTREAM}+*_pre" | sort -V | tail -n1)
+          if [[ $RELEASED_TAG =~ \+([0-9]+)_pre$ ]]; then
+            REVISION="${BASH_REMATCH[1]}"
+            echo "This commit already has $RELEASED_TAG; resuming that release"
+          else
+            MAX_REVISION=0
+            while IFS= read -r tag; do
+              if [[ $tag =~ \+([0-9]+)(_.*)?$ ]] && [ "${BASH_REMATCH[1]}" -gt "$MAX_REVISION" ]; then
+                MAX_REVISION="${BASH_REMATCH[1]}"
+              fi
+            done < <(git tag -l "v${UPSTREAM}+*")
+            REVISION=$((MAX_REVISION + 1))
+          fi
+
+          {
+            echo "upstream=$UPSTREAM"
+            echo "revision=$REVISION"
+            echo "debian_version=${UPSTREAM}-${REVISION}"
+            echo "prerelease_tag=v${UPSTREAM}+${REVISION}_pre"
+            echo "stable_tag=v${UPSTREAM}+${REVISION}"
+          } | tee -a "$GITHUB_OUTPUT"

@@ -1,0 +1,228 @@
+# Reusable release staging: a pre-release and a draft stable release.
+#
+# Creates v<upstream>+<N>_pre as a published pre-release and v<upstream>+<N>
+# as a draft, both targeting the commit this run built, and deletes every
+# other draft release. A rerun completes what an earlier run of the same
+# commit left unfinished: an existing release for this commit is kept when it
+# is complete and replaced when it is not. The workflow fails instead when a
+# release with a higher version already exists or a release with these tags
+# belongs to another commit. Publishing the draft starts the caller's
+# release.yml.
+#
+# Pass `artifact` to attach the .deb packages uploaded by build-deb.yml; the
+# workflow then fails if the artifact holds no package. Without it, releases
+# carry notes only.
+#
+# Optional caller script:
+# - .github/scripts/generate-release-notes.sh <debian-version> <tag> prerelease|draft
+#   writing release_notes.md
+
+name: Stage release
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        description: 'Package name shown in the release notes'
+        required: true
+        type: string
+      package-description:
+        description: 'Short description for the stable release notes'
+        required: false
+        default: ''
+        type: string
+      debian-version:
+        description: '<upstream>-<N>, from release-version.yml'
+        required: true
+        type: string
+      prerelease-tag:
+        description: 'v<upstream>+<N>_pre, from release-version.yml'
+        required: true
+        type: string
+      stable-tag:
+        description: 'v<upstream>+<N>, from release-version.yml'
+        required: true
+        type: string
+      artifact:
+        description: 'Artifact with .deb packages to attach, from build-deb.yml. Empty for notes-only releases.'
+        required: false
+        default: ''
+        type: string
+      apt-repository:
+        description: 'APT repository (owner/name, named after its host) mentioned in the notes when packages are attached'
+        required: false
+        default: ''
+        type: string
+      apt-distro:
+        description: 'APT distribution mentioned in the notes'
+        required: false
+        default: ''
+        type: string
+      apt-component:
+        description: 'APT component mentioned in the notes'
+        required: false
+        default: ''
+        type: string
+      runs-on:
+        description: 'Runner to use'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+
+permissions:
+  contents: write
+
+# Run steps with -eo pipefail rather than the implicit bash -e.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  stage-release:
+    runs-on: ${{ inputs.runs-on }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PACKAGE_NAME: ${{ inputs.package-name }}
+      PACKAGE_DESCRIPTION: ${{ inputs.package-description }}
+      DEBIAN_VERSION: ${{ inputs.debian-version }}
+      PRERELEASE_TAG: ${{ inputs.prerelease-tag }}
+      STABLE_TAG: ${{ inputs.stable-tag }}
+      APT_REPOSITORY: ${{ inputs.apt-repository }}
+      APT_DISTRO: ${{ inputs.apt-distro }}
+      APT_COMPONENT: ${{ inputs.apt-component }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download packages
+        if: inputs.artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ runner.temp }}/release-assets
+
+      - name: List assets
+        id: assets
+        env:
+          ARTIFACT: ${{ inputs.artifact }}
+          ASSET_DIR: ${{ runner.temp }}/release-assets
+        run: |
+          : > "$RUNNER_TEMP/assets.txt"
+          if [ -z "$ARTIFACT" ]; then
+            echo "Notes-only release"
+            echo "has_packages=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          find "$ASSET_DIR" -name '*.deb' -type f | sort > "$RUNNER_TEMP/assets.txt"
+          if [ ! -s "$RUNNER_TEMP/assets.txt" ]; then
+            echo "::error::Artifact $ARTIFACT contains no .deb"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/assets.txt"
+          echo "has_packages=true" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        env:
+          HAS_PACKAGES: ${{ steps.assets.outputs.has_packages }}
+        run: |
+          write_notes() {  # <tag> <prerelease|draft> <output>
+            local tag=$1 kind=$2 out=$3
+            if [ -f .github/scripts/generate-release-notes.sh ]; then
+              .github/scripts/generate-release-notes.sh "$DEBIAN_VERSION" "$tag" "$kind"
+              mv release_notes.md "$out"
+              return
+            fi
+
+            local last_tag changes
+            last_tag=$(gh release list --limit 100 --json tagName,isPrerelease,isDraft \
+              --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' | head -n1 || true)
+            if [ -n "$last_tag" ]; then
+              changes=$(git log "${last_tag}..HEAD" --pretty=format:"- %s (%h)" --no-merges --)
+            else
+              changes=$(git log -10 --pretty=format:"- %s (%h)" --no-merges)
+            fi
+
+            {
+              if [ "$kind" = prerelease ]; then
+                printf '## %s %s (Pre-release)\n\n' "$PACKAGE_NAME" "$tag"
+                printf '> **This is a pre-release build from the main branch. Use for testing only.**\n\n'
+                printf -- '- Commit: `%s`\n- Built: %s\n\n' "$GITHUB_SHA" "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+                printf '### Recent Changes\n\n%s\n' "$changes"
+              else
+                printf '## %s %s\n\n' "$PACKAGE_NAME" "$tag"
+                [ -n "$PACKAGE_DESCRIPTION" ] && printf '%s\n\n' "$PACKAGE_DESCRIPTION"
+                printf '### Changes\n\n%s\n' "$changes"
+              fi
+
+              if [ "$HAS_PACKAGES" = true ] && [ -n "$APT_REPOSITORY" ]; then
+                local host=${APT_REPOSITORY#*/} channel=stable
+                [ "$kind" = prerelease ] && channel=unstable
+                printf '\n### Installation\n\n'
+                printf 'Available from [%s](https://%s) (distribution `%s`, channel `%s`, component `%s`). ' \
+                  "$host" "$host" "$APT_DISTRO" "$channel" "$APT_COMPONENT"
+                printf 'See that page for repository setup, then:\n\n'
+                printf '```bash\nsudo apt update\nsudo apt install %s\n```\n' "$PACKAGE_NAME"
+              fi
+            } > "$out"
+          }
+
+          write_notes "$PRERELEASE_TAG" prerelease "$RUNNER_TEMP/prerelease-notes.md"
+          write_notes "$STABLE_TAG" draft "$RUNNER_TEMP/draft-notes.md"
+          cat "$RUNNER_TEMP/prerelease-notes.md" "$RUNNER_TEMP/draft-notes.md"
+
+      - name: Stage releases
+        run: |
+          mapfile -t ASSETS < "$RUNNER_TEMP/assets.txt"
+
+          # Release tags with a revision, _pre suffix removed.
+          ALL_RELEASES=$(gh release list --limit 1000 --json tagName,isDraft)
+          NEWEST=$(jq -r '.[].tagName | select(test("^v.+\\+[0-9]+(_pre)?$")) | sub("_pre$"; "")' <<< "$ALL_RELEASES" \
+            | { cat; echo "$STABLE_TAG"; } | sort -V | tail -n1)
+          if [ "$NEWEST" != "$STABLE_TAG" ]; then
+            echo "::error::Release $NEWEST is newer than $STABLE_TAG; refusing to stage an older build"
+            exit 1
+          fi
+
+          # ensure_release <tag> <prerelease|draft> <notes file>
+          ensure_release() {
+            local tag=$1 kind=$2 notes=$3 info err target draft assets
+            err=$(mktemp)
+            if info=$(gh release view "$tag" --json isDraft,targetCommitish,assets 2> "$err"); then
+              target=$(jq -r .targetCommitish <<< "$info")
+              draft=$(jq -r .isDraft <<< "$info")
+              assets=$(jq '.assets | length' <<< "$info")
+              if [ "$target" != "$GITHUB_SHA" ]; then
+                echo "::error::Release $tag targets $target, not this commit $GITHUB_SHA"
+                return 1
+              fi
+              if [ "$assets" -eq "${#ASSETS[@]}" ] && { [ "$kind" = draft ] || [ "$draft" = false ]; }; then
+                echo "Release $tag is already complete"
+                return 0
+              fi
+              echo "Release $tag is incomplete (draft=$draft, assets=$assets); replacing it"
+              gh release delete "$tag" --yes
+            elif ! grep -q "release not found" "$err"; then
+              cat "$err" >&2
+              return 1
+            fi
+
+            local flags=(--draft --title "$tag")
+            [ "$kind" = prerelease ] && flags=(--prerelease --title "$tag (Pre-release)")
+            gh release create "$tag" "${flags[@]}" --target "$GITHUB_SHA" --notes-file "$notes" "${ASSETS[@]}"
+          }
+
+          ensure_release "$PRERELEASE_TAG" prerelease "$RUNNER_TEMP/prerelease-notes.md"
+
+          DRAFTS=$(gh release list --limit 1000 --json tagName,isDraft \
+            | jq -r --arg keep "$STABLE_TAG" '.[] | select(.isDraft and .tagName != $keep) | .tagName')
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Deleting draft release $tag"
+            gh release delete "$tag" --yes
+          done <<< "$DRAFTS"
+
+          ensure_release "$STABLE_TAG" draft "$RUNNER_TEMP/draft-notes.md"
