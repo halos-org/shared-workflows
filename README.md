@@ -15,6 +15,22 @@ packages:
 `translation-status.yml` is the exception. It serves translated documentation
 repositories and has nothing to do with packaging.
 
+## Versioning
+
+Releases are tagged `vX.Y.Z`. Each full release also moves the major tag `vX`
+to the newest `vX.*.*` release; release candidates (`vX.Y.Z-rc.N`) do not.
+Breaking changes to workflow names, inputs, secrets, outputs, or required local
+actions ship as a new major.
+
+Pin the major tag:
+
+```yaml
+uses: halos-org/shared-workflows/.github/workflows/<workflow>.yml@v1
+```
+
+The examples below still reference `@main` until the v1 workflows are released
+([issue 49](https://github.com/halos-org/shared-workflows/issues/49)).
+
 ## Workflows
 
 ### pr-checks.yml
