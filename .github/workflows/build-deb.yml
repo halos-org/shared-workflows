@@ -1,0 +1,75 @@
+# Reusable Debian package build for deb repositories.
+#
+# Builds with the caller's .github/actions/build-deb action and runs lintian
+# on every package found in the repository root or build/. A build that
+# produces no package fails.
+#
+# Requirements:
+# - .github/actions/build-deb/action.yml in the caller repository
+
+name: Build Debian package
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: 'Runner to use'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+      lintian:
+        description: 'Run lintian on the built packages'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-deb:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build .deb package
+        uses: ./.github/actions/build-deb
+
+      - name: Find built packages
+        id: packages
+        run: |
+          mapfile -t debs < <(find . build -maxdepth 1 -name '*.deb' -type f 2>/dev/null | sort)
+          if [ "${#debs[@]}" -eq 0 ]; then
+            echo "::error::The build-deb action produced no .deb in the repository root or build/"
+            exit 1
+          fi
+          printf '%s\n' "${debs[@]}"
+          {
+            echo 'list<<EOF'
+            printf '%s\n' "${debs[@]}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install lintian
+        if: inputs.lintian
+        run: sudo apt-get update && sudo apt-get install -y lintian
+
+      - name: Run lintian
+        if: inputs.lintian
+        env:
+          DEBS: ${{ steps.packages.outputs.list }}
+        run: |
+          failed=0
+          while IFS= read -r deb; do
+            echo ""
+            echo "=== Checking: $deb ==="
+            if ! lintian --info --display-info --fail-on error,warning "$deb"; then
+              failed=1
+            fi
+          done <<< "$DEBS"
+          if [ "$failed" -eq 1 ]; then
+            echo ""
+            echo "::error::Lintian found issues. To suppress specific tags, create debian/<package>.lintian-overrides"
+            exit 1
+          fi
