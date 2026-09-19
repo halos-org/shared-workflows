@@ -64,7 +64,15 @@ print('^' + pat + r'$')
 " "$1"
 }
 
-# Fetch all tags from Docker Hub or GHCR.
+# Fetch all tags from Docker Hub or GHCR, following pagination fully — a
+# tag-heavy image (e.g. home-assistant/home-assistant, years of near-daily
+# CalVer releases) exceeds a single page, and the registry silently caps the
+# page size below whatever we ask for rather than erroring. Missing pages
+# means missing the actual latest tag: GHCR returns tags in lexicographic
+# order, so a truncated first page still returns a full page of
+# early-sorting tags and just silently drops everything after, which for
+# home-assistant produced a "latest" from ~2023 while 2026.x releases existed
+# unseen past the cutoff.
 fetch_tags() {
   local image=$1
   if [[ $image == ghcr.io/* ]]; then
@@ -72,17 +80,30 @@ fetch_tags() {
     local token
     token=$(curl -fsSL "https://ghcr.io/token?scope=repository:${repo}:pull" \
       | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-    # n=10000: OCI tags/list defaults to ~100 in lex order which misses
-    # high-numbered versions (e.g., v1.51.0 sorts after v1.9.0)
-    curl -fsSL -H "Authorization: Bearer $token" \
-      "https://ghcr.io/v2/${repo}/tags/list?n=10000" \
-      | python3 -c "import sys,json;[print(t) for t in json.load(sys.stdin).get('tags',[])]"
+    # n=10000 is a request, not a guarantee: GHCR has been observed capping
+    # actual responses at 1000 regardless. Follow the Link: rel="next"
+    # header (RFC 8288, relative-path style) until it's absent.
+    local path="/v2/${repo}/tags/list?n=10000"
+    local headers
+    while [ -n "$path" ]; do
+      headers=$(mktemp)
+      curl -fsSL -D "$headers" -H "Authorization: Bearer $token" \
+        "https://ghcr.io${path}" \
+        | python3 -c "import sys,json;[print(t) for t in json.load(sys.stdin).get('tags',[])]"
+      path=$(tr -d '\r' < "$headers" | grep -i '^link:' \
+        | sed -nE 's/.*<([^>]*)>; *rel="next".*/\1/p')
+      rm -f "$headers"
+    done
   else
     local path=$image
     [[ $image != */* ]] && path="library/$image"
-    curl -fsSL \
-      "https://hub.docker.com/v2/repositories/${path}/tags?page_size=100&ordering=last_updated" \
-      | python3 -c "import sys,json;[print(r['name']) for r in json.load(sys.stdin).get('results',[])]"
+    local url="https://hub.docker.com/v2/repositories/${path}/tags?page_size=100&ordering=last_updated"
+    while [ -n "$url" ] && [ "$url" != "null" ]; do
+      local response
+      response=$(curl -fsSL "$url")
+      echo "$response" | python3 -c "import sys,json;[print(r['name']) for r in json.load(sys.stdin).get('results',[])]"
+      url=$(echo "$response" | python3 -c "import sys,json;print(json.load(sys.stdin).get('next') or '')")
+    done
   fi
 }
 
