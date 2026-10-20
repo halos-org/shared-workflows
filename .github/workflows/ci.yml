@@ -43,7 +43,7 @@ jobs:
           persist-credentials: false
 
       - name: Shellcheck
-        run: shellcheck -x scripts/*.sh tests/*.sh tests/lib/*.sh tests/lib/fake-gh
+        run: shellcheck -x scripts/*.sh tests/*.sh tests/lib/*.sh tests/lib/fake-gh tests/lib/fake-curl
 
       - name: Run script tests
         run: |
