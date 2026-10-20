@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Fake curl for tests. Answers URLs listed in $CURL_ROUTES, one per line as
+# <url> TAB <exit code> TAB <body> TAB <Link header value or empty>.
+# Writes the response headers to the -D file; an unlisted URL fails like a 404.
+headers=""
+url=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    -D) headers=$2; shift 2 ;;
+    -H) shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+
+while IFS=$'\t' read -r route code body link; do
+  [ "$route" = "$url" ] || continue
+  if [ -n "$headers" ]; then
+    {
+      printf 'HTTP/2 200\r\n'
+      [ -n "$link" ] && printf 'link: %s\r\n' "$link"
+      printf '\r\n'
+    } > "$headers"
+  fi
+  [ "$code" = 0 ] || exit "$code"
+  printf '%s\n' "$body"
+  exit 0
+done < "$CURL_ROUTES"
+exit 22

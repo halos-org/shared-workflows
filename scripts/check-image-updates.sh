@@ -64,22 +64,35 @@ print('^' + pat + r'$')
 " "$1"
 }
 
-# Fetch all tags from Docker Hub or GHCR.
+# Fetch all tags from Docker Hub or GHCR. Fails if any request fails: the
+# caller runs it inside `if`, where errexit is off, and a partial list would
+# be taken as complete.
 fetch_tags() {
   local image=$1
   if [[ $image == ghcr.io/* ]]; then
     local repo=${image#ghcr.io/}
     local token
     token=$(curl -fsSL "https://ghcr.io/token?scope=repository:${repo}:pull" \
-      | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-    # n=10000: OCI tags/list defaults to ~100 in lex order which misses
-    # high-numbered versions (e.g., v1.51.0 sorts after v1.9.0)
-    curl -fsSL -H "Authorization: Bearer $token" \
-      "https://ghcr.io/v2/${repo}/tags/list?n=10000" \
-      | python3 -c "import sys,json;[print(t) for t in json.load(sys.stdin).get('tags',[])]"
+      | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])") || return 1
+    # GHCR returns at most 1000 tags per page whatever n asks for, in
+    # lexicographic order, so the newest versions are on the last page.
+    local path="/v2/${repo}/tags/list?n=10000"
+    local headers
+    headers=$(mktemp)
+    while [ -n "$path" ]; do
+      curl -fsSL -D "$headers" -H "Authorization: Bearer $token" \
+        "https://ghcr.io${path}" \
+        | python3 -c "import sys,json;[print(t) for t in json.load(sys.stdin).get('tags',[])]" \
+        || { rm -f "$headers"; return 1; }
+      path=$(tr -d '\r' < "$headers" | grep -i '^link:' \
+        | sed -nE 's/.*<([^>]*)>; *rel="next".*/\1/p')
+    done
+    rm -f "$headers"
   else
     local path=$image
     [[ $image != */* ]] && path="library/$image"
+    # One page suffices: last_updated ordering puts the newest tags first, and
+    # anonymous requests are refused past 1000 results.
     curl -fsSL \
       "https://hub.docker.com/v2/repositories/${path}/tags?page_size=100&ordering=last_updated" \
       | python3 -c "import sys,json;[print(r['name']) for r in json.load(sys.stdin).get('results',[])]"
@@ -114,7 +127,9 @@ while IFS='|' read -r file service image current_tag; do
     continue
   fi
 
-  latest=$(echo "$matching" | sort -V | tail -1)
+  # The current tag takes part, so a tag list missing the newest versions
+  # yields no change rather than a downgrade.
+  latest=$(printf '%s\n%s\n' "$matching" "$current_tag" | sort -V | tail -1)
   echo "  Latest: $latest"
 
   if [ "$latest" != "$current_tag" ]; then
