@@ -1,0 +1,69 @@
+name: Main branch release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Required: release-version.yml computes the next revision from existing tags,
+# so two concurrent runs would compute the same one.
+concurrency:
+  group: ${{ github.repository }}-main-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Optional: omit for repositories without tests.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/run-tests
+
+  version:
+    needs: tests
+    uses: halos-org/shared-workflows/.github/workflows/release-version.yml@v1
+
+  build-deb:
+    needs: version
+    uses: halos-org/shared-workflows/.github/workflows/build-deb.yml@v1
+    with:
+      package-name: my-package
+      upstream-version: ${{ needs.version.outputs.upstream-version }}
+      revision: ${{ needs.version.outputs.revision }}
+      apt-distro: trixie
+      apt-component: main
+      maintainer-name: Hat Labs Oy
+      maintainer-email: info@hatlabs.fi
+
+  stage-release:
+    needs: [version, build-deb]
+    permissions:
+      contents: write
+    uses: halos-org/shared-workflows/.github/workflows/stage-release.yml@v1
+    with:
+      package-name: my-package
+      package-description: One-line description of my-package
+      debian-version: ${{ needs.version.outputs.debian-version }}
+      prerelease-tag: ${{ needs.version.outputs.prerelease-tag }}
+      stable-tag: ${{ needs.version.outputs.stable-tag }}
+      artifact: ${{ needs.build-deb.outputs.artifact }}
+      apt-repository: halos-org/apt.halos.fi
+      apt-distro: trixie
+      apt-component: main
+
+  apt-publish:
+    needs: [version, stage-release]
+    uses: halos-org/shared-workflows/.github/workflows/apt-publish.yml@v1
+    with:
+      channel: unstable
+      prerelease-tag: ${{ needs.version.outputs.prerelease-tag }}
+      apt-repository: halos-org/apt.halos.fi
+      apt-distro: trixie
+      apt-component: main
+    secrets:
+      APT_REPO_PAT: ${{ secrets.APT_REPO_PAT }}

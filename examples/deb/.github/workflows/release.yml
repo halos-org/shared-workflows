@@ -1,0 +1,19 @@
+name: Publish stable release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  apt-publish:
+    uses: halos-org/shared-workflows/.github/workflows/apt-publish.yml@v1
+    with:
+      channel: stable
+      apt-repository: halos-org/apt.halos.fi
+      apt-distro: trixie
+      apt-component: main
+    secrets:
+      APT_REPO_PAT: ${{ secrets.APT_REPO_PAT }}

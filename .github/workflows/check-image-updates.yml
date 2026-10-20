@@ -39,19 +39,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # github.workflow_ref = "owner/repo/path@refs/heads/branch" — extract the ref
-      # after @ so the scripts checkout matches whichever version the caller pinned.
-      - name: Resolve shared workflow ref
-        id: wf-ref
-        run: echo "ref=${WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-
+      # job.workflow_* describe this reusable workflow file, so the scripts come
+      # from the revision the caller pinned. The github.workflow_* properties
+      # describe the calling workflow instead.
       - name: Checkout shared scripts
         uses: actions/checkout@v4
         with:
-          repository: halos-org/shared-workflows
-          ref: ${{ steps.wf-ref.outputs.ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .shared-workflows
           sparse-checkout: scripts
 

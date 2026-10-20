@@ -1,0 +1,186 @@
+# Reusable npm publication for a published stable release.
+#
+# Call from the caller's release.yml on `release: published`. Pre-releases are
+# skipped. Two jobs keep dependency code away from publish credentials:
+#
+# - build (no id-token): checks the release, installs dependencies without
+#   install scripts, runs the package's prepublishOnly script, and packs the
+#   tarball.
+# - publish (id-token: write): publishes that tarball with --ignore-scripts.
+#   Nothing from node_modules runs here.
+#
+# Trusted publishing: the npm package's trusted publisher names the caller's
+# workflow file (for example release.yml), not this one. The caller must grant
+# `id-token: write` to the calling job. npm adds provenance only for public
+# repositories.
+#
+# The publish job serializes itself in the concurrency group
+# <repository>-publish-npm-job; callers must not use that group name.
+#
+# Checks before building: the release commit is on the default branch, the tag
+# is v<upstream>+<N>, <upstream> equals VERSION at that commit, and VERSION
+# equals package.json's version. The version is skipped with a warning when it
+# is already on npm.
+
+name: Publish npm package
+
+on:
+  workflow_call:
+    inputs:
+      version-file:
+        description: 'Path to the VERSION file'
+        required: false
+        default: 'VERSION'
+        type: string
+      runs-on:
+        description: 'GitHub-hosted runner to use; npm trusted publishing does not support self-hosted runners'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+
+permissions:
+  contents: read
+
+# Run steps with -eo pipefail rather than the implicit bash -e.
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_VERSION: '24'
+  # The first npm release with trusted publishing.
+  NPM_MIN_VERSION: '11.5.1'
+  PACKAGE_ARTIFACT: npm-package
+
+jobs:
+  build:
+    if: ${{ !(github.event_name == 'release' && github.event.release.prerelease) }}
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - name: Require a release event
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != release ]; then
+            echo "::error::publish-npm.yml publishes from a release event, not $EVENT"
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a commit on the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if ! git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH"; then
+            echo "::error::Release commit $(git rev-parse HEAD) is not on $DEFAULT_BRANCH"
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Check versions
+        id: check
+        env:
+          VERSION_FILE: ${{ inputs.version-file }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
+          VERSION="${VERSION#v}"
+          # Stable tag format written by release-version.yml.
+          if ! [[ $TAG =~ ^v([0-9][0-9A-Za-z.~-]*)\+([0-9]+)$ ]]; then
+            echo "::error::Release tag $TAG is not a v<upstream>+<N> stable tag"
+            exit 1
+          fi
+          if [ "${BASH_REMATCH[1]}" != "$VERSION" ]; then
+            echo "::error::Release $TAG is for ${BASH_REMATCH[1]}, but $VERSION_FILE at that commit is $VERSION"
+            exit 1
+          fi
+
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PKG_VERSION" != "$VERSION" ]; then
+            echo "::error::$VERSION_FILE ($VERSION) does not match package.json ($PKG_VERSION)"
+            exit 1
+          fi
+
+          PKG_NAME=$(node -p "require('./package.json').name")
+          if npm view "$PKG_NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "::warning::$PKG_NAME@$VERSION is already on npm; nothing to publish. Bump $VERSION_FILE to release a new version."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$PKG_NAME@$VERSION is not on npm; publishing"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and pack
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --ignore-scripts
+          else
+            echo "::warning::No package-lock.json; dependencies resolve to the newest matching versions at publish time"
+            npm install --ignore-scripts
+          fi
+          npm run prepublishOnly --if-present
+          mkdir -p "$RUNNER_TEMP/pack"
+          npm pack --pack-destination "$RUNNER_TEMP/pack"
+
+      - name: Upload package
+        if: steps.check.outputs.publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_ARTIFACT }}
+          path: ${{ runner.temp }}/pack/*.tgz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: ${{ github.repository }}-publish-npm-job
+      cancel-in-progress: false
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Require npm with trusted publishing
+        run: |
+          NPM_VERSION=$(npm --version)
+          if [ "$(printf '%s\n%s\n' "$NPM_MIN_VERSION" "$NPM_VERSION" | sort -V | head -n1)" != "$NPM_MIN_VERSION" ]; then
+            echo "::error::npm $NPM_VERSION is older than $NPM_MIN_VERSION, the first release with trusted publishing"
+            exit 1
+          fi
+          echo "npm $NPM_VERSION"
+
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_ARTIFACT }}
+          path: ${{ runner.temp }}/pack
+
+      - name: Publish
+        run: |
+          mapfile -t tarballs < <(find "$RUNNER_TEMP/pack" -name '*.tgz' -type f)
+          if [ "${#tarballs[@]}" -ne 1 ]; then
+            echo "::error::Expected one package tarball, found ${#tarballs[@]}"
+            exit 1
+          fi
+          npm publish "${tarballs[0]}" --ignore-scripts
