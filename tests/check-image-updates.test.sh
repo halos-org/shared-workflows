@@ -69,6 +69,47 @@ test_docker_hub_reads_newest_page_only() {
   check "Docker Hub newest tag from the first page" acme/tool:1.2.0 "$IMAGE_LINE"
 }
 
+HUB_MIXED="$HUB_PAGE1${TAB}0${TAB}{\"results\":[{\"name\":\"2.0.0\"},{\"name\":\"1.2.0\"},{\"name\":\"1.0.0\"}]}${TAB}"
+
+test_scope_all_takes_newest() {
+  check_image acme/tool:1.0.0 "$HUB_MIXED"
+  check "default scope takes the new major" acme/tool:2.0.0 "$IMAGE_LINE"
+}
+
+test_scope_minor_stays_in_major() {
+  UPDATE_SCOPE=minor check_image acme/tool:1.0.0 "$HUB_MIXED"
+  check "minor scope stays in the current major" acme/tool:1.2.0 "$IMAGE_LINE"
+}
+
+test_scope_major_takes_new_major_only() {
+  UPDATE_SCOPE=major check_image acme/tool:1.0.0 "$HUB_MIXED"
+  check "major scope takes the new major" acme/tool:2.0.0 "$IMAGE_LINE"
+}
+
+test_scope_major_ignores_minor() {
+  UPDATE_SCOPE=major check_image acme/tool:1.0.0 \
+    "$HUB_PAGE1${TAB}0${TAB}{\"results\":[{\"name\":\"1.2.0\"},{\"name\":\"1.0.0\"}]}${TAB}"
+  check "major scope leaves a minor update alone" acme/tool:1.0.0 "$IMAGE_LINE"
+}
+
+test_scope_minor_treats_date_tags_as_minor() {
+  UPDATE_SCOPE=minor check_image acme/tool:20261102 \
+    "$HUB_PAGE1${TAB}0${TAB}{\"results\":[{\"name\":\"20261201\"}]}${TAB}"
+  check "minor scope takes a newer date tag" acme/tool:20261201 "$IMAGE_LINE"
+}
+
+test_scope_major_ignores_date_tags() {
+  UPDATE_SCOPE=major check_image acme/tool:20261102 \
+    "$HUB_PAGE1${TAB}0${TAB}{\"results\":[{\"name\":\"20261201\"}]}${TAB}"
+  check "major scope leaves a date tag alone" acme/tool:20261102 "$IMAGE_LINE"
+}
+
+test_scope_minor_handles_v_prefix_and_suffix() {
+  UPDATE_SCOPE=minor check_image ghcr.io/acme/app:v2.37.0-halos.1 "$GHCR_TOKEN" \
+    "$GHCR_PAGE1${TAB}0${TAB}{\"tags\":[\"v2.38.0-halos.1\",\"v3.0.0-halos.1\"]}${TAB}"
+  check "minor scope on a v-prefixed tag" ghcr.io/acme/app:v2.38.0-halos.1 "$IMAGE_LINE"
+}
+
 FAKEBIN=$(mktemp -d)
 ln -s "$ROOT/tests/lib/fake-curl" "$FAKEBIN/curl"
 PATH="$FAKEBIN:$PATH"

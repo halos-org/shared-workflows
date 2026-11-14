@@ -6,6 +6,9 @@
 #   GH_TOKEN  - GitHub token for gh CLI
 #   BRANCH    - branch name for the PR
 #
+# Optional env:
+#   PR_TITLE  - PR title and commit subject
+#
 # With AUTO_MERGE=true, also required:
 #   DEFAULT_BRANCH     - the repository's default branch
 #   GITHUB_REPOSITORY  - owner/repo (set by the runner)
@@ -16,6 +19,7 @@
 set -euo pipefail
 
 AUTO_MERGE=${AUTO_MERGE:-false}
+PR_TITLE=${PR_TITLE:-chore: update container images}
 
 if [ "$AUTO_MERGE" = true ]; then
   # The branch is the checked-out ref's tip plus the update, force-pushed. From
@@ -50,7 +54,7 @@ EXISTING_PR=$(find_pr)
 
 git checkout -B "$BRANCH"
 git add -u
-git commit -m "chore: update container images"
+git commit -m "$PR_TITLE"
 HEAD_SHA=$(git rev-parse HEAD)
 
 # Re-pushing an identical update every day would restart the PR's checks.
@@ -69,7 +73,7 @@ else
     echo "Updated existing PR #$PR"
   else
     gh pr create \
-      --title "chore: update container images" \
+      --title "$PR_TITLE" \
       --body-file /tmp/pr_body.md
     PR=$(find_pr)
     echo "Created PR #$PR"

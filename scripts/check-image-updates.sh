@@ -5,6 +5,10 @@
 #   COMPOSE_PATTERN  - glob for compose files (e.g., docker-compose.yml)
 #   GITHUB_OUTPUT    - set by the Actions runner
 #
+# Optional env:
+#   UPDATE_SCOPE     - all (default), minor (stay within the current major) or
+#                      major (only a newer major)
+#
 # Outputs (via GITHUB_OUTPUT):
 #   has_updates  - "true" if any image was updated
 #
@@ -99,6 +103,28 @@ fetch_tags() {
   fi
 }
 
+# The major is the first number in the tag. A date tag (YYYYMMDD) has none,
+# since every release changes that number; it counts as a minor update.
+major_of() {
+  if [[ $1 =~ ([0-9]+) ]] && [ ${#BASH_REMATCH[1]} -ne 8 ]; then
+    echo "$((10#${BASH_REMATCH[1]}))"
+  fi
+}
+
+# in_scope <current tag> — filters candidate tags on stdin by UPDATE_SCOPE.
+in_scope() {
+  local current_major tag
+  current_major=$(major_of "$1")
+  while read -r tag; do
+    case "${UPDATE_SCOPE:-all}" in
+      minor) [ -z "$current_major" ] || [ "$(major_of "$tag")" = "$current_major" ] ;;
+      major) [ -n "$current_major" ] && [ "$(major_of "$tag")" != "$current_major" ] ;;
+      *) true ;;
+    esac && echo "$tag"
+  done
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Check each image for updates
 # ---------------------------------------------------------------------------
@@ -121,9 +147,9 @@ while IFS='|' read -r file service image current_tag; do
     continue
   fi
 
-  matching=$(echo "$all_tags" | grep -E "$pattern" || true)
+  matching=$(echo "$all_tags" | grep -E "$pattern" | in_scope "$current_tag" || true)
   if [ -z "$matching" ]; then
-    echo "  No tags matching pattern"
+    echo "  No tags matching pattern in scope ${UPDATE_SCOPE:-all}"
     continue
   fi
 

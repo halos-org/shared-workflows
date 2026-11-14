@@ -18,6 +18,16 @@ on:
         required: false
         default: 'chore/update-container-images'
         type: string
+      update-scope:
+        description: 'all, minor (newest tag within the current major) or major (only a newer major). A date tag has no major and counts as minor.'
+        required: false
+        default: 'all'
+        type: string
+      pr-title:
+        description: 'PR title and commit subject'
+        required: false
+        default: 'chore: update container images'
+        type: string
       dry-run:
         description: 'Log updates without creating a PR'
         required: false
@@ -74,6 +84,7 @@ jobs:
         id: check
         env:
           COMPOSE_PATTERN: ${{ inputs.compose-pattern }}
+          UPDATE_SCOPE: ${{ inputs.update-scope }}
         run: bash .shared-workflows/scripts/check-image-updates.sh
 
       - name: Create or update PR
@@ -81,6 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.token || github.token }}
           BRANCH: ${{ inputs.branch-name }}
+          PR_TITLE: ${{ inputs.pr-title }}
           AUTO_MERGE: ${{ inputs.auto-merge }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: bash .shared-workflows/scripts/create-update-pr.sh
