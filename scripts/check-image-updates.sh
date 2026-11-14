@@ -159,12 +159,17 @@ print(v)
       # The app's package revision restarts at 1 on a new upstream version and
       # advances otherwise -- a new build of the same upstream still has to sort
       # above the last one, and resetting to 1 would sort below it.
-      old_upstream="${old_meta_ver%-*}"
+      # An epoch outranks everything after it, so dropping one makes every
+      # later version a downgrade.
+      epoch=""
+      [[ "$old_meta_ver" =~ ^[0-9]+: ]] && epoch="${BASH_REMATCH[0]}"
+      old_upstream="${old_meta_ver#"$epoch"}"
+      old_upstream="${old_upstream%-*}"
       old_rev="${old_meta_ver##*-}"
       if [ "$new_upstream" = "$old_upstream" ] && [[ "$old_rev" =~ ^[0-9]+$ ]]; then
-        new_meta_ver="${new_upstream}-$((old_rev + 1))"
+        new_meta_ver="${epoch}${new_upstream}-$((old_rev + 1))"
       else
-        new_meta_ver="${new_upstream}-1"
+        new_meta_ver="${epoch}${new_upstream}-1"
       fi
       # Update version and upstream_version, preserving any YAML quoting style
       python3 - "$metadata" "$new_meta_ver" "$new_upstream" << 'PYEOF'

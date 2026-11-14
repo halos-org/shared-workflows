@@ -29,6 +29,24 @@ check_image() {
   IMAGE_LINE=$(grep 'image:' docker-compose.yml | sed 's/ *image: //')
 }
 
+# check_app_version <image:tag> <metadata version> <routes...> — as
+# check_image, with a metadata.yaml next to the compose file; leaves the
+# resulting metadata version in META_VERSION.
+check_app_version() {
+  in_temp_dir
+  printf 'services:\n  app:\n    image: %s\n' "$1" > docker-compose.yml
+  printf 'version: %s\nupstream_version: "%s"\n' "$2" "${1##*:}" > metadata.yaml
+  shift 2
+  CURL_ROUTES=$(mktemp)
+  printf '%s\n' "$@" > "$CURL_ROUTES"
+  export CURL_ROUTES
+  COMPOSE_PATTERN=docker-compose.yml run_step "$SCRIPT" || {
+    cat "$STDOUT_FILE"
+    FAILURES=$((FAILURES + 1))
+  }
+  META_VERSION=$(sed -n 's/^version: //p' metadata.yaml)
+}
+
 test_ghcr_follows_link_to_second_page() {
   check_image ghcr.io/acme/app:2023.1.0 "$GHCR_TOKEN" \
     "$GHCR_PAGE1${TAB}0${TAB}{\"tags\":[\"2023.1.0\",\"2023.2.0\"]}${TAB}$GHCR_NEXT" \
@@ -67,6 +85,24 @@ test_docker_hub_reads_newest_page_only() {
   check_image acme/tool:1.0.0 \
     "$HUB_PAGE1${TAB}0${TAB}{\"results\":[{\"name\":\"1.2.0\"},{\"name\":\"1.0.0\"}],\"next\":\"$HUB_PAGE1&page=2\"}${TAB}"
   check "Docker Hub newest tag from the first page" acme/tool:1.2.0 "$IMAGE_LINE"
+}
+
+test_app_version_restarts_revision_on_new_upstream() {
+  check_app_version acme/tool:20261102 20261102-3 \
+    "$HUB_PAGE1${TAB}0${TAB}{\"results\":[{\"name\":\"20261112\"}]}${TAB}"
+  check "new upstream restarts the revision" 20261112-1 "$META_VERSION"
+}
+
+test_app_version_keeps_epoch_on_new_upstream() {
+  check_app_version acme/tool:20261102 1:20261102-1 \
+    "$HUB_PAGE1${TAB}0${TAB}{\"results\":[{\"name\":\"20261112\"}]}${TAB}"
+  check "epoch survives a new upstream" 1:20261112-1 "$META_VERSION"
+}
+
+test_app_version_keeps_epoch_on_rebuild() {
+  check_app_version ghcr.io/acme/app:v1.0.0-halos.1 1:1.0.0-3 "$GHCR_TOKEN" \
+    "$GHCR_PAGE1${TAB}0${TAB}{\"tags\":[\"v1.0.0-halos.1\",\"v1.0.0-halos.2\"]}${TAB}"
+  check "epoch survives a rebuild of the same upstream" 1:1.0.0-4 "$META_VERSION"
 }
 
 FAKEBIN=$(mktemp -d)
